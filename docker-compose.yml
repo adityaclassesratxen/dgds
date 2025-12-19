@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: dgds-postgres
+    environment:
+      POSTGRES_DB: dgds_clone_db
+      POSTGRES_USER: dgds_user
+      POSTGRES_PASSWORD: dgds_password
+    ports:
+      - "2050:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - dgds-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dgds_user -d dgds_clone_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: dgds-backend
+    environment:
+      DATABASE_URL: postgresql://dgds_user:dgds_password@postgres:5432/dgds_clone_db
+      # Razorpay Configuration
+      RAZORPAY_KEY_ID: rzp_test_RsaT4fuoDUVWwl
+      RAZORPAY_KEY_SECRET: uydoRwEPkv6KVxbg1WV6qimW
+      RAZORPAY_WEBHOOK_SECRET: testingmyrideflow
+      # PhonePe Configuration
+      PHONEPE_CLIENT_ID: M2342A4X8I8BU_2512101111
+      PHONEPE_CLIENT_SECRET: ZTY0Njk5NGItOTdjNS00YzUzLThhNDMtNDhjMTU5NGUyOGY0
+      PHONEPE_MERCHANT_ID: M2342A4X8I8BU
+      PHONEPE_ENVIRONMENT: UAT
+      PHONEPE_CALLBACK_URL: http://localhost:2060/api/payments/phonepe/callback
+      # UPI Configuration
+      MERCHANT_UPI_ID: rideflow@upi
+      MERCHANT_NAME: RideFlow
+      # Commission Structure
+      HOURLY_RATE: 400
+      DRIVER_COMMISSION_PERCENT: 75
+      ADMIN_COMMISSION_PERCENT: 20
+      DISPATCHER_COMMISSION_PERCENT: 2
+      SUPER_ADMIN_COMMISSION_PERCENT: 3
+      APP_NAME: DGDS Clone
+      # Authentication
+      JWT_SECRET_KEY: your-super-secret-jwt-key-change-in-production-min-32-characters-long
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+    ports:
+      - "2060:2070"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - dgds-network
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: dgds-frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:2060
+      VITE_RAZORPAY_KEY_ID: rzp_test_RsaT4fuoDUVWwl
+      VITE_MERCHANT_UPI_ID: rideflow@upi
+      VITE_MERCHANT_NAME: RideFlow
+    ports:
+      - "2070:2050"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - dgds-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  dgds-network:
+    driver: bridge
