@@ -7,6 +7,29 @@ from pydantic import BaseModel, EmailStr, Field, model_validator
 from models import PaymentMethod, TransactionStatus
 
 
+class SavedPaymentMethodCreate(BaseModel):
+    payment_method: PaymentMethod
+    upi_id: Optional[str] = None
+    nickname: Optional[str] = None
+    is_default: bool = False
+
+
+class SavedPaymentMethodResponse(BaseModel):
+    id: int
+    customer_id: int
+    payment_method: PaymentMethod
+    upi_id: Optional[str] = None
+    card_last4: Optional[str] = None
+    card_brand: Optional[str] = None
+    is_default: bool
+    is_active: bool
+    nickname: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class AddressBase(BaseModel):
     address_line: str = Field(..., max_length=255)
     city: str = Field(..., max_length=100)
@@ -173,6 +196,8 @@ class BookingResponse(BaseModel):
     customer_id: int
     driver_id: int
     vehicle_id: int
+    customer: Optional[CustomerResponse] = None
+    driver: Optional[DriverResponse] = None
     pickup_location: str
     destination_location: str
     return_location: Optional[str]

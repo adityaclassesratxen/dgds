@@ -1,15 +1,19 @@
 from decimal import Decimal
 from typing import Optional
 import os
+import io
+import base64
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import qrcode
 
 # Load environment variables from .env file
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import case
 from database import SessionLocal, engine, Base
 from models import (
@@ -31,19 +35,7 @@ from models import (
     PaymentStatus,
     User,
     UserRole,
-)
-from schemas import (
-    CustomerCreate,
-    CustomerResponse,
-    DriverCreate,
-    DriverResponse,
-    BookingCreate,
-    BookingResponse,
-    UserLogin,
-    UserRegister,
-    Token,
-    UserResponse,
-    PasswordChange,
+    Tenant
 )
 from auth import (
     get_password_hash,
@@ -56,6 +48,22 @@ from auth import (
     require_customer,
     require_super_admin,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+)
+from tenant_filter import get_tenant_filter, apply_tenant_filter, check_tenant_access
+from schemas import (
+    CustomerCreate,
+    CustomerResponse,
+    DriverCreate,
+    DriverResponse,
+    BookingCreate,
+    BookingResponse,
+    SavedPaymentMethodCreate,
+    SavedPaymentMethodResponse,
+    UserResponse,
+    UserRegister,
+    UserLogin,
+    Token,
+    PasswordChange
 )
 from datetime import timedelta
 import uvicorn
@@ -82,9 +90,16 @@ async def add_security_headers(request, call_next):
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
+_cors_origins_env = os.getenv("CORS_ORIGINS") or os.getenv("FRONTEND_ORIGINS")
+_cors_origins = (
+    [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+    if _cors_origins_env
+    else ["http://localhost:2050", "http://localhost:2070", "http://localhost:3000"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -98,14 +113,22 @@ def get_db():
         db.close()
 
 @app.post("/api/customers/", response_model=CustomerResponse)
-async def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
+async def create_customer(
+    customer: CustomerCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     existing_customer = (
         db.query(Customer).filter(Customer.email == customer.email).first()
     )
     if existing_customer:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    db_customer = Customer(name=customer.name, email=customer.email)
+    db_customer = Customer(
+        name=customer.name, 
+        email=customer.email,
+        tenant_id=current_user.tenant_id
+    )
 
     db_customer.addresses = [
         CustomerAddress(
@@ -134,8 +157,16 @@ async def create_customer(customer: CustomerCreate, db: Session = Depends(get_db
     return db_customer
 
 @app.get("/api/customers/", response_model=list[CustomerResponse])
-async def get_customers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
+async def get_customers(
+    skip: int = 0, 
+    limit: int = 100, 
+    include_archived: bool = False, 
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter)
+):
+    from tenant_filter import apply_tenant_filter
     query = db.query(Customer)
+    query = apply_tenant_filter(query, Customer, tenant_id)
     if not include_archived:
         query = query.filter(Customer.is_archived == False)
     customers = query.offset(skip).limit(limit).all()
@@ -204,20 +235,41 @@ async def restore_customer(customer_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/transactions/", response_model=list[BookingResponse])
-async def get_transactions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    transactions = db.query(RideTransaction).offset(skip).limit(limit).all()
-    return transactions
+async def get_transactions(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter),
+):
+    query = (
+        db.query(RideTransaction)
+        .options(
+            selectinload(RideTransaction.customer).selectinload(Customer.contact_numbers),
+            selectinload(RideTransaction.driver).selectinload(Driver.contact_numbers),
+            selectinload(RideTransaction.events),
+        )
+        .order_by(RideTransaction.created_at.desc())
+    )
+    query = apply_tenant_filter(query, RideTransaction, tenant_id)
+    return query.offset(skip).limit(limit).all()
 
 
 @app.post("/api/drivers/", response_model=DriverResponse)
-async def create_driver(driver: DriverCreate, db: Session = Depends(get_db)):
+async def create_driver(
+    driver: DriverCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     existing_driver = (
         db.query(Driver).filter(Driver.name == driver.name).first()
     )
     if existing_driver:
         raise HTTPException(status_code=400, detail="Driver name already exists")
 
-    db_driver = Driver(name=driver.name)
+    db_driver = Driver(
+        name=driver.name,
+        tenant_id=current_user.tenant_id
+    )
 
     db_driver.addresses = [
         DriverAddress(
@@ -247,8 +299,15 @@ async def create_driver(driver: DriverCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/drivers/", response_model=list[DriverResponse])
-async def get_drivers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
+async def get_drivers(
+    skip: int = 0, 
+    limit: int = 100, 
+    include_archived: bool = False, 
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter)
+):
     query = db.query(Driver)
+    query = apply_tenant_filter(query, Driver, tenant_id)
     if not include_archived:
         query = query.filter(Driver.is_archived == False)
     drivers = query.offset(skip).limit(limit).all()
@@ -313,8 +372,15 @@ async def restore_driver(driver_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/dispatchers/")
-async def get_dispatchers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
+async def get_dispatchers(
+    skip: int = 0, 
+    limit: int = 100, 
+    include_archived: bool = False, 
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter)
+):
     query = db.query(Dispatcher)
+    query = apply_tenant_filter(query, Dispatcher, tenant_id)
     if not include_archived:
         query = query.filter(Dispatcher.is_archived == False)
     dispatchers = query.offset(skip).limit(limit).all()
@@ -358,11 +424,16 @@ class DispatcherUpdate(BaseModel):
 
 
 @app.post("/api/dispatchers/")
-async def create_dispatcher(dispatcher: DispatcherCreate, db: Session = Depends(get_db)):
+async def create_dispatcher(
+    dispatcher: DispatcherCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     db_dispatcher = Dispatcher(
         name=dispatcher.name,
         contact_number=dispatcher.contact_number,
         email=dispatcher.email,
+        tenant_id=current_user.tenant_id
     )
     db.add(db_dispatcher)
     db.commit()
@@ -517,7 +588,11 @@ def generate_transaction_number(db: Session) -> str:
 
 
 @app.post("/api/bookings/", response_model=BookingResponse)
-async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
+async def create_booking(
+    booking: BookingCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     # Ensure dispatcher, customer, driver, vehicle exist (basic validation)
     dispatcher = db.query(Dispatcher).get(booking.dispatcher_id)
     if not dispatcher:
@@ -564,6 +639,7 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         admin_share=admin_share,
         dispatcher_share=dispatcher_share,
         super_admin_share=super_admin_share,
+        tenant_id=current_user.tenant_id,
     )
 
     transaction.events = [
@@ -584,14 +660,23 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/bookings/", response_model=list[BookingResponse])
-async def list_bookings(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
-    bookings = (
-        db.query(RideTransaction).order_by(RideTransaction.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
+async def list_bookings(
+    skip: int = 0, 
+    limit: int = 50, 
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter)
+):
+    query = (
+        db.query(RideTransaction)
+        .options(
+            selectinload(RideTransaction.customer).selectinload(Customer.contact_numbers),
+            selectinload(RideTransaction.driver).selectinload(Driver.contact_numbers),
+            selectinload(RideTransaction.events),
+        )
+        .order_by(RideTransaction.created_at.desc())
     )
-    return bookings
+    query = apply_tenant_filter(query, RideTransaction, tenant_id)
+    return query.offset(skip).limit(limit).all()
 
 
 @app.patch("/api/bookings/{transaction_id}/status")
@@ -674,9 +759,12 @@ async def summary_by_customer(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter)
 ):
     from sqlalchemy import func as sqlfunc
+    from tenant_filter import apply_tenant_filter
+    
     query = (
         db.query(
             Customer.id,
@@ -688,6 +776,9 @@ async def summary_by_customer(
         )
         .outerjoin(RideTransaction, RideTransaction.customer_id == Customer.id)
     )
+    
+    # Apply tenant filtering
+    query = apply_tenant_filter(query, Customer, tenant_id)
     
     # Apply filters
     if dispatcher_id:
@@ -726,9 +817,12 @@ async def summary_by_driver(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter)
 ):
     from sqlalchemy import func as sqlfunc
+    from tenant_filter import apply_tenant_filter
+    
     query = (
         db.query(
             Driver.id,
@@ -744,6 +838,9 @@ async def summary_by_driver(
         )
         .outerjoin(RideTransaction, RideTransaction.driver_id == Driver.id)
     )
+    
+    # Apply tenant filtering to both Driver and RideTransaction
+    query = apply_tenant_filter(query, Driver, tenant_id)
     
     # Apply filters
     if dispatcher_id:
@@ -781,9 +878,12 @@ async def summary_by_dispatcher(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_id: Optional[int] = Depends(get_tenant_filter)
 ):
     from sqlalchemy import func as sqlfunc
+    from tenant_filter import apply_tenant_filter
+    
     query = (
         db.query(
             Dispatcher.id,
@@ -799,6 +899,9 @@ async def summary_by_dispatcher(
         )
         .outerjoin(RideTransaction, RideTransaction.dispatcher_id == Dispatcher.id)
     )
+    
+    # Apply tenant filtering
+    query = apply_tenant_filter(query, Dispatcher, tenant_id)
     
     # Apply filters
     if dispatcher_id:
@@ -1447,6 +1550,102 @@ async def get_payment_history(
     ]
 
 
+@app.post("/api/customers/{customer_id}/payment-methods")
+async def save_payment_method(
+    customer_id: int,
+    payment_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Save a payment method for quick future payments"""
+    from models import SavedPaymentMethod
+    
+    # Verify customer exists
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # If setting as default, unset other defaults
+    if payment_data.get("is_default", False):
+        db.query(SavedPaymentMethod).filter(
+            SavedPaymentMethod.customer_id == customer_id,
+            SavedPaymentMethod.is_default == True
+        ).update({"is_default": False})
+    
+    # Create saved payment method
+    saved_method = SavedPaymentMethod(
+        customer_id=customer_id,
+        payment_method=payment_data["payment_method"],
+        upi_id=payment_data.get("upi_id"),
+        nickname=payment_data.get("nickname"),
+        is_default=payment_data.get("is_default", False),
+    )
+    
+    db.add(saved_method)
+    db.commit()
+    db.refresh(saved_method)
+    
+    return {
+        "id": saved_method.id,
+        "payment_method": saved_method.payment_method.value,
+        "upi_id": saved_method.upi_id,
+        "nickname": saved_method.nickname,
+        "is_default": saved_method.is_default,
+        "created_at": saved_method.created_at.isoformat()
+    }
+
+
+@app.get("/api/customers/{customer_id}/payment-methods")
+async def get_saved_payment_methods(
+    customer_id: int,
+    db: Session = Depends(get_db),
+):
+    """Get all saved payment methods for a customer"""
+    from models import SavedPaymentMethod
+    
+    methods = db.query(SavedPaymentMethod).filter(
+        SavedPaymentMethod.customer_id == customer_id,
+        SavedPaymentMethod.is_active == True
+    ).order_by(SavedPaymentMethod.is_default.desc(), SavedPaymentMethod.created_at.desc()).all()
+    
+    return [
+        {
+            "id": m.id,
+            "payment_method": m.payment_method.value,
+            "upi_id": m.upi_id,
+            "card_last4": m.card_last4,
+            "card_brand": m.card_brand,
+            "nickname": m.nickname,
+            "is_default": m.is_default,
+            "created_at": m.created_at.isoformat()
+        }
+        for m in methods
+    ]
+
+
+@app.delete("/api/customers/{customer_id}/payment-methods/{method_id}")
+async def delete_saved_payment_method(
+    customer_id: int,
+    method_id: int,
+    db: Session = Depends(get_db),
+):
+    """Delete a saved payment method"""
+    from models import SavedPaymentMethod
+    
+    method = db.query(SavedPaymentMethod).filter(
+        SavedPaymentMethod.id == method_id,
+        SavedPaymentMethod.customer_id == customer_id
+    ).first()
+    
+    if not method:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+    
+    db.delete(method)
+    db.commit()
+    
+    return {"message": "Payment method deleted successfully"}
+
+
 @app.get("/api/config")
 async def get_config():
     import os
@@ -1456,9 +1655,312 @@ async def get_config():
         "admin_commission_percent": int(os.getenv("ADMIN_COMMISSION_PERCENT", 20)),
         "dispatcher_commission_percent": int(os.getenv("DISPATCHER_COMMISSION_PERCENT", 2)),
         "super_admin_commission_percent": int(os.getenv("SUPER_ADMIN_COMMISSION_PERCENT", 3)),
-        "payment_methods": ["RAZORPAY", "PHONEPE", "CASH"],
+        "payment_methods": ["RAZORPAY", "PHONEPE", "GOOGLEPAY", "UPI", "QR_CODE", "CASH"],
         "app_name": os.getenv("APP_NAME", "DGDS Clone"),
+        "merchant_upi_id": os.getenv("MERCHANT_UPI_ID", "merchant@upi"),
+        "merchant_name": os.getenv("MERCHANT_NAME", "DGDS"),
     }
+
+
+@app.get("/api/payments/generate-qr/{transaction_id}")
+async def generate_payment_qr(
+    transaction_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate UPI QR code for payment
+    Returns base64 encoded QR code image
+    """
+    # Get transaction details
+    transaction = db.query(RideTransaction).filter(RideTransaction.id == transaction_id).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    # Get merchant UPI details from environment
+    merchant_upi_id = os.getenv("MERCHANT_UPI_ID", "merchant@upi")
+    merchant_name = os.getenv("MERCHANT_NAME", "DGDS")
+    
+    # Create UPI payment URL
+    amount = float(transaction.total_amount)
+    transaction_note = f"Payment for {transaction.transaction_number}"
+    
+    upi_url = f"upi://pay?pa={merchant_upi_id}&pn={merchant_name}&am={amount}&cu=INR&tn={transaction_note}"
+    
+    # Generate QR code
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(upi_url)
+    qr.make(fit=True)
+    
+    # Create QR code image
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Convert to base64
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    buffer.seek(0)
+    img_base64 = base64.b64encode(buffer.getvalue()).decode()
+    
+    return {
+        "qr_code": f"data:image/png;base64,{img_base64}",
+        "upi_url": upi_url,
+        "merchant_upi_id": merchant_upi_id,
+        "merchant_name": merchant_name,
+        "amount": amount,
+        "transaction_number": transaction.transaction_number
+    }
+
+
+# Tenant Management Endpoints
+@app.post("/api/super-admin/tenants", response_model=dict)
+async def create_tenant(
+    name: str,
+    code: str,
+    description: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a new tenant
+    Only accessible by Super Admin
+    """
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can create tenants")
+    
+    # Check if tenant code already exists
+    existing_tenant = db.query(Tenant).filter(Tenant.code == code).first()
+    if existing_tenant:
+        raise HTTPException(status_code=400, detail="Tenant code already exists")
+    
+    # Create new tenant
+    tenant = Tenant(
+        name=name,
+        code=code,
+        description=description,
+        is_active=True
+    )
+    db.add(tenant)
+    db.commit()
+    db.refresh(tenant)
+    
+    return {
+        "id": tenant.id,
+        "name": tenant.name,
+        "code": tenant.code,
+        "description": tenant.description,
+        "is_active": tenant.is_active,
+        "created_at": tenant.created_at
+    }
+
+
+@app.get("/api/super-admin/tenants", response_model=list)
+async def get_all_tenants(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all tenants
+    Only accessible by Super Admin
+    """
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can view tenants")
+    
+    tenants = db.query(Tenant).all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "code": t.code,
+            "description": t.description,
+            "is_active": t.is_active,
+            "created_at": t.created_at,
+            "customer_count": len(t.customers),
+            "driver_count": len(t.drivers),
+            "dispatcher_count": len(t.dispatchers),
+            "transaction_count": len(t.ride_transactions)
+        }
+        for t in tenants
+    ]
+
+
+@app.post("/api/super-admin/tenants/{tenant_id}/reset")
+async def reset_tenant_data(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Reset all data for a specific tenant
+    Only accessible by Super Admin
+    """
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can reset tenant data")
+    
+    # Get tenant
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    try:
+        # Delete all tenant data in order of dependencies
+        # Delete payment transactions
+        db.query(PaymentTransaction).filter(PaymentTransaction.tenant_id == tenant_id).delete()
+        
+        # Delete ride transaction events
+        db.query(RideTransactionEvent).filter(RideTransactionEvent.transaction_id.in_(
+            db.query(RideTransaction.id).filter(RideTransaction.tenant_id == tenant_id)
+        )).delete()
+        
+        # Delete ride transactions
+        db.query(RideTransaction).filter(RideTransaction.tenant_id == tenant_id).delete()
+        
+        # Delete saved payment methods
+        db.query(SavedPaymentMethod).filter(SavedPaymentMethod.tenant_id == tenant_id).delete()
+        
+        # Delete customer vehicles
+        db.query(CustomerVehicle).filter(CustomerVehicle.customer_id.in_(
+            db.query(Customer.id).filter(Customer.tenant_id == tenant_id)
+        )).delete()
+        
+        # Delete customer addresses and contacts
+        db.query(CustomerAddress).filter(CustomerAddress.customer_id.in_(
+            db.query(Customer.id).filter(Customer.tenant_id == tenant_id)
+        )).delete()
+        
+        db.query(ContactNumber).filter(ContactNumber.customer_id.in_(
+            db.query(Customer.id).filter(Customer.tenant_id == tenant_id)
+        )).delete()
+        
+        # Delete customers
+        db.query(Customer).filter(Customer.tenant_id == tenant_id).delete()
+        
+        # Delete driver contacts and addresses
+        db.query(DriverContactNumber).filter(DriverContactNumber.driver_id.in_(
+            db.query(Driver.id).filter(Driver.tenant_id == tenant_id)
+        )).delete()
+        
+        db.query(DriverAddress).filter(DriverAddress.driver_id.in_(
+            db.query(Driver.id).filter(Driver.tenant_id == tenant_id)
+        )).delete()
+        
+        # Delete drivers
+        db.query(Driver).filter(Driver.tenant_id == tenant_id).delete()
+        
+        # Delete dispatchers
+        db.query(Dispatcher).filter(Dispatcher.tenant_id == tenant_id).delete()
+        
+        # Delete tenant admin users
+        db.query(User).filter(
+            User.tenant_id == tenant_id,
+            User.role.in_([UserRole.ADMIN, UserRole.TENANT_ADMIN, UserRole.DISPATCHER, UserRole.DRIVER, UserRole.CUSTOMER])
+        ).delete()
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"All data for tenant '{tenant.name}' has been reset successfully"
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error resetting tenant data: {str(e)}")
+
+
+@app.post("/api/seed-database")
+async def seed_database_endpoint(
+    tenant_name: str = "DGDS Clone",
+    db: Session = Depends(get_db)
+):
+    """
+    Seed database with initial data
+    Public endpoint for initial setup
+    """
+    # Check if database is already seeded (check if any users exist)
+    existing_users = db.query(User).count()
+    if existing_users > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="Database already seeded. Use reset endpoint if you're a Super Admin."
+        )
+    
+    try:
+        import subprocess
+        import os
+        
+        # Run the reset script
+        script_path = os.path.join(os.path.dirname(__file__), "reset_db.py")
+        result = subprocess.run(
+            ["python", script_path, tenant_name],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "message": f"Database seeded successfully for tenant: {tenant_name}",
+                "output": result.stdout,
+                "tenant_name": tenant_name
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database seeding failed: {result.stderr}"
+            )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Database seeding timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error seeding database: {str(e)}")
+
+
+@app.post("/api/admin/reset-database")
+async def reset_database_endpoint(
+    tenant_name: str = "DGDS Clone",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Reset database and reseed with fresh data
+    Only accessible by Super Admin
+    """
+    # Check if user is super admin
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can reset database")
+    
+    try:
+        import subprocess
+        import os
+        
+        # Run the reset script
+        script_path = os.path.join(os.path.dirname(__file__), "reset_db.py")
+        result = subprocess.run(
+            ["python", script_path, tenant_name],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "message": f"Database reset successfully for tenant: {tenant_name}",
+                "output": result.stdout,
+                "tenant_name": tenant_name
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database reset failed: {result.stderr}"
+            )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Database reset timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resetting database: {str(e)}")
 
 
 @app.get("/")
@@ -1552,7 +2054,12 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.id, "email": user.email, "role": user.role.value},
+        data={
+          "sub": str(user.id), 
+          "email": user.email, 
+          "role": user.role.value,
+          "tenant_id": str(user.tenant_id) if user.tenant_id else None
+        },
         expires_delta=access_token_expires
     )
     
@@ -1599,6 +2106,113 @@ async def logout(current_user: User = Depends(get_current_user)):
     return {"message": "Logged out successfully"}
 
 
+@app.post("/api/auth/quick-login/{role}")
+@limiter.limit("20/minute")
+async def quick_login(
+    request: Request,
+    role: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Quick login for development/testing.
+    Only enabled when ENABLE_DEV_AUTH environment variable is set to 'true'.
+    """
+    # Check if dev auth is enabled
+    if os.getenv("ENABLE_DEV_AUTH", "false").lower() != "true":
+        raise HTTPException(
+            status_code=404,
+            detail="Quick login is not available"
+        )
+    
+    # Validate role
+    try:
+        user_role = UserRole(role.upper())
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role. Must be one of: {[r.value for r in UserRole]}"
+        )
+    
+    # Default test accounts based on role
+    test_accounts = {
+        UserRole.CUSTOMER: "john@example.com",
+        UserRole.DRIVER: "rajesh@dgds.com",
+        UserRole.DISPATCHER: "priya@dgds.com",
+        UserRole.ADMIN: "admin@dgds.com",
+        UserRole.SUPER_ADMIN: "superadmin@dgds.com",
+    }
+    
+    email = test_accounts.get(user_role)
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="No test account available for this role"
+        )
+    
+    # Find user
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=404,
+            detail="Test account not found or inactive. Please run seed data first."
+        )
+    
+    # Update last login
+    from datetime import datetime
+    user.last_login = datetime.utcnow()
+    db.commit()
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={
+          "sub": str(user.id), 
+          "email": user.email, 
+          "role": user.role.value,
+          "tenant_id": str(user.tenant_id) if user.tenant_id else None
+        },
+        expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "role": user.role.value,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+        },
+        "message": f"Logged in as test {user_role.value} account"
+    }
+
+
+@app.post("/api/seed")
+async def seed_database(db: Session = Depends(get_db)):
+    """
+    Seed the database with test data.
+    Only enabled when ENABLE_DEV_AUTH environment variable is set to 'true'.
+    """
+    # Check if dev auth is enabled
+    if os.getenv("ENABLE_DEV_AUTH", "false").lower() != "true":
+        raise HTTPException(
+            status_code=404,
+            detail="Seed endpoint is not available"
+        )
+    
+    try:
+        from seed_data import run_seed
+        run_seed()
+        return {"message": "Database seeded successfully with test data"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to seed database: {str(e)}"
+        )
+
+
 @app.get("/api/health")
 async def health_check(db: Session = Depends(get_db)):
     from sqlalchemy import text
@@ -1619,4 +2233,6 @@ async def health_check(db: Session = Depends(get_db)):
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=2070, reload=True)
+    port = int(os.getenv("PORT", "2070"))
+    reload = os.getenv("UVICORN_RELOAD", "false").lower() == "true"
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload)

@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 2070
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2070", "--reload"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-2070}"]

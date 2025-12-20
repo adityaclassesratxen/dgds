@@ -21,6 +21,28 @@ class UserRole(str, Enum):
     DRIVER = "DRIVER"
     CUSTOMER = "CUSTOMER"
     SUPER_ADMIN = "SUPER_ADMIN"
+    TENANT_ADMIN = "TENANT_ADMIN"
+
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    code = Column(String(20), unique=True, index=True, nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    customers = relationship("Customer", back_populates="tenant")
+    drivers = relationship("Driver", back_populates="tenant")
+    dispatchers = relationship("Dispatcher", back_populates="tenant")
+    admin_users = relationship("User", back_populates="tenant")
+    ride_transactions = relationship("RideTransaction", back_populates="tenant")
+    payment_transactions = relationship("PaymentTransaction", back_populates="tenant")
+    saved_payment_methods = relationship("SavedPaymentMethod", back_populates="tenant")
 
 
 class User(Base):
@@ -37,9 +59,13 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
     driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=True)
     dispatcher_id = Column(Integer, ForeignKey("dispatchers.id"), nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="admin_users")
 
 
 class Customer(Base):
@@ -50,7 +76,13 @@ class Customer(Base):
     email = Column(String(100), unique=True, index=True, nullable=False)
     is_archived = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="customers")
 
     addresses = relationship(
         "CustomerAddress",
@@ -136,6 +168,12 @@ class Driver(Base):
     is_archived = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="drivers")
 
     addresses = relationship(
         "DriverAddress",
@@ -196,6 +234,12 @@ class Dispatcher(Base):
     is_archived = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="dispatchers")
 
 
 class AdminContact(Base):
@@ -233,6 +277,9 @@ class TransactionStatus(str, Enum):
 class PaymentMethod(str, Enum):
     RAZORPAY = "RAZORPAY"
     PHONEPE = "PHONEPE"
+    GOOGLEPAY = "GOOGLEPAY"
+    UPI = "UPI"
+    QR_CODE = "QR_CODE"
     CASH = "CASH"
 
 
@@ -260,6 +307,12 @@ class RideTransaction(Base):
     vehicle_id = Column(Integer, ForeignKey("customer_vehicles.id"), nullable=False)
     dispatcher_id = Column(Integer, ForeignKey("dispatchers.id"), nullable=False)
     pickup_location = Column(String(255), nullable=False)
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="ride_transactions")
     destination_location = Column(String(255), nullable=False)
     return_location = Column(String(255), nullable=True)
     ride_duration_hours = Column(Integer, nullable=False)
@@ -328,7 +381,12 @@ class PaymentTransaction(Base):
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="payment_transactions")
     ride_transaction = relationship("RideTransaction", back_populates="payments")
 
 
@@ -344,3 +402,29 @@ class RideTransactionEvent(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     transaction = relationship("RideTransaction", back_populates="events")
+
+
+class SavedPaymentMethod(Base):
+    __tablename__ = "saved_payment_methods"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(
+        Integer, ForeignKey("customers.id", ondelete="CASCADE"), nullable=False
+    )
+    payment_method = Column(SAEnum(PaymentMethod), nullable=False)
+    upi_id = Column(String(100), nullable=True)  # For UPI payments
+    card_last4 = Column(String(4), nullable=True)  # Last 4 digits of card
+    card_brand = Column(String(50), nullable=True)  # Visa, Mastercard, etc.
+    razorpay_customer_id = Column(String(100), nullable=True)  # Razorpay customer ID
+    razorpay_token = Column(String(100), nullable=True)  # Razorpay token for saved card
+    is_default = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    nickname = Column(String(100), nullable=True)  # User-friendly name like "My PhonePe"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="saved_payment_methods")
