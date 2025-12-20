@@ -23,8 +23,23 @@ import {
   Database,
 } from 'lucide-react';
 
-// API Configuration - Uses environment variable or falls back to localhost
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:2060';
+// API Configuration - uses environment variables with smart fallbacks
+const resolveApiBaseUrl = () => {
+  const primary = (import.meta.env.VITE_API_BASE_URL || '').trim();
+  if (primary) return primary;
+
+  const localFallback = (import.meta.env.VITE_API_BASE_URL_LOCAL || '').trim();
+  const isLocalhost = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+
+  if (isLocalhost) {
+    return localFallback || 'http://localhost:2060';
+  }
+
+  // Deployed fallback (Render backend URL)
+  return 'https://dgds-test.onrender.com';
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 
 // Axios instance with defaults
@@ -358,7 +373,7 @@ function App() {
         }
       } else if (error.message) {
         if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
-          errorMessage = 'Cannot connect to server. Please ensure the backend is running on http://localhost:5060';
+          errorMessage = `Cannot connect to server. Please ensure the backend is reachable at ${API_BASE_URL}`;
         } else {
           errorMessage = error.message;
         }
