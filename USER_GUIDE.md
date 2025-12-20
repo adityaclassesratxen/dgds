@@ -7,6 +7,31 @@ DGDS is a comprehensive ride-booking and transaction management system with the 
 - **Dispatcher**: 2%
 - **Super Admin**: 3%
 
+## Storyboard: End-to-End User Journey
+
+1. **Landing Page Discovery**
+   - Visitor lands on the responsive marketing page (desktop/tablet/mobile) and can review product highlights.
+   - An API status badge confirms backend availability (`https://dgds-test.onrender.com`) before entering the app.
+   - CTA options: “Enter App” (opens registration flow) or “Login / Demo” (shows auth panel with quick logins).
+
+2. **Authentication & Quick Start**
+   - Login/register card shows API health and dynamic quick-login buttons (Customer, Driver, Dispatcher, Admin, Super Admin).
+   - Selecting quick login performs a seeded credential sign-in; registration creates a fresh account and auto-logs in.
+   - Successful auth stores JWT + user context and transitions to the tenant dashboard.
+
+3. **Tenant Dashboard & Navigation**
+   - Left sidebar exposes role-aware sections: Customers, Drivers, Dispatchers, Trips, Booking, Vehicles, Summary.
+   - Dashboard fetches tenant-scoped data (customers/drivers/transactions) using Render backend APIs with tenant filtering.
+
+4. **Operational Flows**
+   - **Customer onboarding:** register customer + addresses + phones, then assign vehicles.
+   - **Trip lifecycle:** dispatchers create bookings, drivers manage statuses, payments recorded at completion.
+   - **Reporting:** Summary view consolidates revenue, commission splits, and outstanding dues across roles.
+
+5. **Continuous Feedback Loop**
+   - API badge continues polling (30s) showing backend uptime within the app shell.
+   - Users can reseed demo data via landing panel when needed, ensuring complete end-to-end validation.
+
 ## Access URLs
 - **Frontend**: http://localhost:2050
 - **Backend API**: http://localhost:2070

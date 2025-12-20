@@ -117,6 +117,14 @@ const statCards = [
   { label: 'Transactions', value: '5 seed' },
 ];
 
+const getBackendHost = (url) => {
+  try {
+    return new URL(url).host;
+  } catch (error) {
+    return url;
+  }
+};
+
 function App() {
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -152,6 +160,13 @@ function App() {
   const [driverSummary, setDriverSummary] = useState([]);
   const [dispatcherSummary, setDispatcherSummary] = useState([]);
   const [transactionSummary, setTransactionSummary] = useState([]);
+  const [apiStatus, setApiStatus] = useState({
+    state: 'checking',
+    label: 'Checking',
+    message: 'Attempting connection...',
+    target: getBackendHost(API_BASE_URL),
+    timestamp: Date.now(),
+  });
   const [paymentSummary, setPaymentSummary] = useState(null);
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState(null);
@@ -470,6 +485,44 @@ function App() {
     };
   }, [summaryData]);
 
+  const backendHost = useMemo(() => getBackendHost(API_BASE_URL), []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkApiAvailability = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/`, { timeout: 5000 });
+        if (!isMounted) return;
+        setApiStatus({
+          state: 'online',
+          label: 'Online',
+          message: response.data?.message || 'Backend reachable',
+          target: backendHost,
+          timestamp: Date.now(),
+        });
+      } catch (error) {
+        if (!isMounted) return;
+        const detail = error.response?.data?.detail || error.message || 'Unavailable';
+        setApiStatus({
+          state: 'offline',
+          label: 'Offline',
+          message: detail,
+          target: backendHost,
+          timestamp: Date.now(),
+        });
+      }
+    };
+
+    checkApiAvailability();
+    const intervalId = setInterval(checkApiAvailability, 30000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [backendHost]);
+
   // Fetch saved payment methods when trip is selected
   useEffect(() => {
     if (selectedTrip && selectedTrip.customer?.id) {
@@ -747,6 +800,12 @@ function App() {
 
   // Login/Register UI - Show if not authenticated
   if (!isAuthenticated) {
+    const apiStatusStyles = {
+      online: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
+      offline: 'bg-red-500/10 border-red-500/30 text-red-300',
+      checking: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+    };
+
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
@@ -755,7 +814,24 @@ function App() {
               <Car className="h-8 w-8 text-purple-300" />
               <span className="text-xl uppercase tracking-[0.2em] font-semibold text-purple-300">DGDS CLONE</span>
             </div>
-            
+
+            <div
+              className={`mb-6 flex flex-col items-center gap-1 rounded-xl border px-4 py-3 text-xs font-medium text-center ${apiStatusStyles[apiStatus.state]}`}
+            >
+              <div className="flex items-center gap-2 uppercase tracking-widest">
+                <span>API Status</span>
+                {apiStatus.state === 'online' && <CheckCircle2 className="h-4 w-4" />}
+                {apiStatus.state === 'offline' && <AlertCircle className="h-4 w-4" />}
+                {apiStatus.state === 'checking' && <RefreshCw className="h-4 w-4 animate-spin" />}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                {apiStatus.label}: {apiStatus.message}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Target: {apiStatus.target} · Last checked {new Date(apiStatus.timestamp).toLocaleTimeString()}
+              </div>
+            </div>
+
             <div className="flex gap-2 mb-6">
               <button
                 onClick={() => setShowLogin(true)}
@@ -974,6 +1050,12 @@ function App() {
 
   // Landing Page Component
   if (showLanding) {
+    const apiStatusStyles = {
+      online: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
+      offline: 'bg-red-500/10 border-red-500/30 text-red-300',
+      checking: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+    };
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 text-slate-100">
         <div className="mx-auto max-w-6xl px-4 py-10">
@@ -989,6 +1071,18 @@ function App() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
+              <div
+                className={`flex flex-col gap-1 rounded-2xl border px-4 py-3 text-xs font-medium text-center ${apiStatusStyles[apiStatus.state]}`}
+              >
+                <div className="flex items-center justify-center gap-2 uppercase tracking-widest">
+                  <span>API</span>
+                  {apiStatus.state === 'online' && <CheckCircle2 className="h-4 w-4" />}
+                  {apiStatus.state === 'offline' && <AlertCircle className="h-4 w-4" />}
+                  {apiStatus.state === 'checking' && <RefreshCw className="h-4 w-4 animate-spin" />}
+                </div>
+                <span className="text-[11px] text-slate-300">{apiStatus.label}: {apiStatus.message}</span>
+                <span className="text-[11px] text-slate-500">{apiStatus.target}</span>
+              </div>
               <button
                 onClick={() => setShowLanding(false)}
                 className="px-5 py-3 rounded-2xl bg-gradient-to-r from-purple-500 to-blue-500 text-white font-semibold hover:from-purple-600 hover:to-blue-600 transition"
