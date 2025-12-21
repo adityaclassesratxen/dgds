@@ -1,5 +1,9 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { useTranslation } from 'react-i18next';
+import './i18n/config';
+import LanguageSwitcher from './components/LanguageSwitcher';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
 import {
   Car,
   UserPlus,
@@ -137,6 +141,9 @@ const getBackendHost = (url) => {
 };
 
 function App() {
+  // i18n hook for translations
+  const { t } = useTranslation();
+  
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return !!localStorage.getItem('auth_token');
@@ -1434,9 +1441,16 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
       {/* Left Sidebar */}
       <aside className="w-64 min-h-screen bg-slate-900 border-r border-slate-800 p-4 flex flex-col gap-2">
-        <div className="flex items-center gap-3 text-purple-300 mb-6 px-2">
-          <Car className="h-7 w-7" />
-          <span className="text-sm uppercase tracking-[0.2em] font-semibold">DGDS CLONE</span>
+        <div className="flex items-center justify-between mb-4 px-2">
+          <div className="flex items-center gap-3 text-purple-300">
+            <Car className="h-7 w-7" />
+            <span className="text-sm uppercase tracking-[0.2em] font-semibold">DGDS CLONE</span>
+          </div>
+        </div>
+        
+        {/* Language Switcher */}
+        <div className="mb-4 px-2">
+          <LanguageSwitcher />
         </div>
         
         {/* Quick Actions */}
@@ -1555,6 +1569,17 @@ function App() {
           >
             <DollarSign className="h-4 w-4" />
             Summary
+          </button>
+          <button
+            onClick={() => setView('analytics')}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
+              view === 'analytics'
+                ? 'bg-purple-500 text-white'
+                : 'text-purple-300 hover:bg-slate-800'
+            }`}
+          >
+            <Database className="h-4 w-4" />
+            {t('nav.analytics')}
           </button>
         </div>
         
@@ -2993,6 +3018,12 @@ function App() {
                 )}
               </form>
             )}
+          </div>
+        )}
+
+        {view === 'analytics' && (
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
+            <AnalyticsDashboard api={api} />
           </div>
         )}
 
