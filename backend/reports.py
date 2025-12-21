@@ -151,18 +151,22 @@ def generate_analytics_report(db: Session, filters: ReportFilters):
 
 
 def generate_customer_report(db: Session, filters: ReportFilters):
-    """Generate report grouped by customer"""
+    """Generate report grouped by customer with comprehensive payment and ride info"""
     start_date, end_date = get_date_range(
         filters.date_range.range_type,
         filters.date_range.start_date,
         filters.date_range.end_date
     )
     
-    # Query trips grouped by customer
+    # Query trips grouped by customer with detailed stats
     query = db.query(
         RideTransaction.customer_id,
         RideTransaction.customer_name,
-        func.count(RideTransaction.id).label('trip_count'),
+        func.count(RideTransaction.id).label('total_rides'),
+        func.sum(func.case((RideTransaction.status == 'COMPLETED', 1), else_=0)).label('completed_rides'),
+        func.sum(func.case((RideTransaction.status == 'REQUESTED', 1), else_=0)).label('active_rides'),
+        func.sum(func.case((RideTransaction.status == 'CANCELLED', 1), else_=0)).label('cancelled_rides'),
+        func.sum(func.case((RideTransaction.status.in_(['REQUESTED', 'ACCEPTED', 'ENROUTE']), 1), else_=0)).label('pending_rides'),
         func.sum(RideTransaction.total_amount).label('total_spent'),
         func.sum(func.case((RideTransaction.is_paid == True, RideTransaction.total_amount), else_=0)).label('paid_amount'),
     ).filter(
@@ -176,22 +180,50 @@ def generate_customer_report(db: Session, filters: ReportFilters):
     
     results = query.all()
     
+    customers_data = []
+    for r in results:
+        # Get last 3 rides for this customer
+        last_rides_query = db.query(RideTransaction).filter(
+            RideTransaction.customer_id == r.customer_id,
+            RideTransaction.created_at.between(start_date, end_date)
+        ).order_by(RideTransaction.created_at.desc()).limit(3).all()
+        
+        last_rides = [
+            {
+                'id': ride.id,
+                'transaction_number': ride.transaction_number,
+                'status': ride.status,
+                'amount': float(ride.total_amount or 0),
+                'is_paid': ride.is_paid,
+                'created_at': ride.created_at.isoformat() if ride.created_at else None,
+                'pickup_location': ride.pickup_location,
+                'destination_location': ride.destination_location,
+                'driver_name': ride.driver_name,
+            }
+            for ride in last_rides_query
+        ]
+        
+        customers_data.append({
+            'customer_id': r.customer_id,
+            'customer_name': r.customer_name,
+            'total_rides': r.total_rides,
+            'completed_rides': r.completed_rides,
+            'active_rides': r.active_rides,
+            'cancelled_rides': r.cancelled_rides,
+            'pending_rides': r.pending_rides,
+            'total_spent': float(r.total_spent or 0),
+            'paid_amount': float(r.paid_amount or 0),
+            'unpaid_amount': float((r.total_spent or 0) - (r.paid_amount or 0)),
+            'dues': float((r.total_spent or 0) - (r.paid_amount or 0)),
+            'last_three_rides': last_rides,
+        })
+    
     return {
         'period': {
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
         },
-        'customers': [
-            {
-                'customer_id': r.customer_id,
-                'customer_name': r.customer_name,
-                'trip_count': r.trip_count,
-                'total_spent': float(r.total_spent or 0),
-                'paid_amount': float(r.paid_amount or 0),
-                'unpaid_amount': float((r.total_spent or 0) - (r.paid_amount or 0)),
-            }
-            for r in results
-        ]
+        'customers': customers_data
     }
 
 

@@ -167,32 +167,143 @@ const AnalyticsDashboard = ({ api }) => {
   const renderCustomerReport = () => {
     if (!reportData || reportType !== 'by-customer') return null;
 
+    const [expandedCustomer, setExpandedCustomer] = useState(null);
+
     return (
-      <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Customer Report</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-700">
-                <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Customer</th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Trips</th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Total Spent</th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Paid</th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Unpaid</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reportData.customers.map((customer, index) => (
-                <tr key={index} className="border-b border-slate-800 hover:bg-slate-700/30">
-                  <td className="py-3 px-4 text-sm text-white">{customer.customer_name}</td>
-                  <td className="py-3 px-4 text-sm text-right text-slate-300">{customer.trip_count}</td>
-                  <td className="py-3 px-4 text-sm text-right text-white">₹{customer.total_spent.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-sm text-right text-emerald-400">₹{customer.paid_amount.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-sm text-right text-red-400">₹{customer.unpaid_amount.toLocaleString()}</td>
+      <div className="space-y-6">
+        <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Customer Report</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Customer</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Total Rides</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Completed</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Active</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Pending</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Total Spent</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Paid</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Dues</th>
+                  <th className="text-center py-3 px-4 text-sm font-medium text-slate-400">Last 3 Rides</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {reportData.customers.map((customer, index) => (
+                  <React.Fragment key={index}>
+                    <tr className="border-b border-slate-800 hover:bg-slate-700/30">
+                      <td className="py-3 px-4 text-sm text-white font-medium">{customer.customer_name}</td>
+                      <td className="py-3 px-4 text-sm text-right text-slate-300">{customer.total_rides}</td>
+                      <td className="py-3 px-4 text-sm text-right text-emerald-400">{customer.completed_rides}</td>
+                      <td className="py-3 px-4 text-sm text-right text-blue-400">{customer.active_rides}</td>
+                      <td className="py-3 px-4 text-sm text-right text-amber-400">{customer.pending_rides}</td>
+                      <td className="py-3 px-4 text-sm text-right text-white font-medium">₹{customer.total_spent.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-sm text-right text-emerald-400">₹{customer.paid_amount.toLocaleString()}</td>
+                      <td className={`py-3 px-4 text-sm text-right font-medium ${customer.dues > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                        ₹{customer.dues.toLocaleString()}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          onClick={() => setExpandedCustomer(expandedCustomer === index ? null : index)}
+                          className="text-purple-400 hover:text-purple-300 text-sm font-medium"
+                        >
+                          {expandedCustomer === index ? 'Hide' : 'View'}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedCustomer === index && (
+                      <tr>
+                        <td colSpan="9" className="px-4 py-0">
+                          <div className="bg-slate-900/50 rounded-xl p-4 mb-2">
+                            <h4 className="text-sm font-semibold text-white mb-3">Last 3 Rides</h4>
+                            <div className="space-y-2">
+                              {customer.last_three_rides.map((ride, rideIndex) => (
+                                <div key={rideIndex} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-sm font-medium text-blue-400">{ride.transaction_number}</span>
+                                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                          ride.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300' :
+                                          ride.status === 'CANCELLED' ? 'bg-red-500/20 text-red-300' :
+                                          ride.status === 'REQUESTED' ? 'bg-amber-500/20 text-amber-300' :
+                                          'bg-blue-500/20 text-blue-300'
+                                        }`}>
+                                          {ride.status}
+                                        </span>
+                                        {ride.is_paid ? (
+                                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-500/20 text-emerald-300">
+                                            PAID
+                                          </span>
+                                        ) : (
+                                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 text-red-300">
+                                            UNPAID
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-slate-400 space-y-1">
+                                        <p><span className="text-slate-500">Driver:</span> {ride.driver_name || 'N/A'}</p>
+                                        <p><span className="text-slate-500">Route:</span> {ride.pickup_location} → {ride.destination_location}</p>
+                                        <p><span className="text-slate-500">Date:</span> {ride.created_at ? new Date(ride.created_at).toLocaleString() : 'N/A'}</p>
+                                      </div>
+                                    </div>
+                                    <div className="text-right ml-4">
+                                      <p className="text-lg font-bold text-white">₹{ride.amount.toLocaleString()}</p>
+                                      {!ride.is_paid && (
+                                        <p className="text-xs text-red-400 mt-1">Payment Due</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Customer Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-slate-400">Total Customers</p>
+              <Users className="h-5 w-5 text-purple-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">{reportData.customers.length}</p>
+          </div>
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-emerald-300">Total Revenue</p>
+              <DollarSign className="h-5 w-5 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">
+              ₹{reportData.customers.reduce((sum, c) => sum + c.total_spent, 0).toLocaleString()}
+            </p>
+          </div>
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-red-300">Total Dues</p>
+              <AlertCircle className="h-5 w-5 text-red-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">
+              ₹{reportData.customers.reduce((sum, c) => sum + c.dues, 0).toLocaleString()}
+            </p>
+          </div>
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-blue-300">Total Rides</p>
+              <Calendar className="h-5 w-5 text-blue-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">
+              {reportData.customers.reduce((sum, c) => sum + c.total_rides, 0)}
+            </p>
+          </div>
         </div>
       </div>
     );
