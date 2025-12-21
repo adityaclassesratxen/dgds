@@ -94,7 +94,7 @@ _cors_origins_env = os.getenv("CORS_ORIGINS") or os.getenv("FRONTEND_ORIGINS")
 _cors_origins = (
     [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
     if _cors_origins_env
-    else ["http://localhost:2050", "http://localhost:2070", "http://localhost:3000"]
+    else ["http://localhost:2050", "http://localhost:2070", "http://localhost:3000", "https://dgds-test.vercel.app"]
 )
 
 app.add_middleware(
