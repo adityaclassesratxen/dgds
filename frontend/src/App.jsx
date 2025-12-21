@@ -1,9 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { useTranslation } from 'react-i18next';
-import './i18n/config';
-import LanguageSwitcher from './components/LanguageSwitcher';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
 import {
   Car,
   UserPlus,
@@ -12,7 +8,6 @@ import {
   MapPin,
   Compass,
   Plus,
-  Camera,
   Trash2,
   CheckCircle2,
   Users,
@@ -24,32 +19,13 @@ import {
   Truck,
   Eye,
   EyeOff,
-  Database,
-  X,
-  Info,
-  Upload,
-  MessageSquare,
-  Clock,
-  FileImage,
 } from 'lucide-react';
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line
+} from 'recharts';
 
-// API Configuration - uses environment variables with smart fallbacks
-const resolveApiBaseUrl = () => {
-  const primary = (import.meta.env.VITE_API_BASE_URL || '').trim();
-  if (primary) return primary;
-
-  const localFallback = (import.meta.env.VITE_API_BASE_URL_LOCAL || '').trim();
-  const isLocalhost = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-
-  if (isLocalhost) {
-    return localFallback || 'http://localhost:2060';
-  }
-
-  // Deployed fallback (Render backend URL)
-  return 'https://dgds-test.onrender.com';
-};
-
-const API_BASE_URL = resolveApiBaseUrl();
+// API Configuration - Uses environment variable or falls back to localhost
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:2060';
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
 
 // Axios instance with defaults
@@ -61,17 +37,12 @@ const api = axios.create({
   },
 });
 
-// Add request interceptor to include auth token and tenant context
+// Add request interceptor to include auth token
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-    }
-    // Super Admin can switch tenant context
-    const activeTenantId = localStorage.getItem('active_tenant_id');
-    if (activeTenantId) {
-      config.headers['X-Tenant-Id'] = activeTenantId;
     }
     return config;
   },
@@ -132,18 +103,7 @@ const statCards = [
   { label: 'Transactions', value: '5 seed' },
 ];
 
-const getBackendHost = (url) => {
-  try {
-    return new URL(url).host;
-  } catch (error) {
-    return url;
-  }
-};
-
 function App() {
-  // i18n hook for translations
-  const { t } = useTranslation();
-  
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return !!localStorage.getItem('auth_token');
@@ -178,13 +138,6 @@ function App() {
   const [driverSummary, setDriverSummary] = useState([]);
   const [dispatcherSummary, setDispatcherSummary] = useState([]);
   const [transactionSummary, setTransactionSummary] = useState([]);
-  const [apiStatus, setApiStatus] = useState({
-    state: 'checking',
-    label: 'Checking',
-    message: 'Attempting connection...',
-    target: getBackendHost(API_BASE_URL),
-    timestamp: Date.now(),
-  });
   const [paymentSummary, setPaymentSummary] = useState(null);
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState(null);
@@ -237,281 +190,24 @@ function App() {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [selectedBreakdown, setSelectedBreakdown] = useState(null); // 'customer', 'driver', 'dispatcher', 'admin', 'super_admin'
-  const [savedPaymentMethods, setSavedPaymentMethods] = useState([]);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [paymentDetails, setPaymentDetails] = useState({ upiId: '', mobileNumber: '', qrImage: null, qrCodeData: null });
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [tenantName, setTenantName] = useState('DGDS Clone');
-  const [resetLoading, setResetLoading] = useState(false);
   
-  // Tenant management state
-  const [tenants, setTenants] = useState([]);
-  const [showTenantModal, setShowTenantModal] = useState(false);
-  const [tenantForm, setTenantForm] = useState({ name: '', code: '', description: '' });
-  const [showTenantResetModal, setShowTenantResetModal] = useState(false);
-  const [selectedTenant, setSelectedTenant] = useState(null);
-  const [activeTenant, setActiveTenant] = useState(() => {
-    const stored = localStorage.getItem('active_tenant');
-    return stored ? JSON.parse(stored) : null;
-  });
-  const [showTenantPicker, setShowTenantPicker] = useState(false);
+  // Analytics state
+  const [selectedAnalyticsReport, setSelectedAnalyticsReport] = useState(null); // 'driver', 'customer', 'dispatcher', 'admin', 'super_admin', 'transaction', 'vehicle', 'overview'
+  const [analyticsTimeFilter, setAnalyticsTimeFilter] = useState('all');
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [vehicleTransmissionFilter, setVehicleTransmissionFilter] = useState('all'); // 'all', 'automatic', 'manual'
   
-  // Payment and error chat state
-  const [paymentScreenshots, setPaymentScreenshots] = useState({});
-  const [selectedTripForPayment, setSelectedTripForPayment] = useState(null);
-  const [errorChatMessages, setErrorChatMessages] = useState({});
-  const [showErrorChat, setShowErrorChat] = useState(false);
-  const [selectedTripForChat, setSelectedTripForChat] = useState(null);
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  
-  // Landing page state
-  const [showLanding, setShowLanding] = useState(!isAuthenticated);
-  const [isDbSeeded, setIsDbSeeded] = useState(false);
-  const [seedLoading, setSeedLoading] = useState(false);
-  const [seedTenantName, setSeedTenantName] = useState('DGDS Clone');
-  const [dialog, setDialog] = useState(null);
+  // Expandable sections state for drill-down
+  const [expandedDrivers, setExpandedDrivers] = useState({});
+  const [expandedCustomers, setExpandedCustomers] = useState({});
+  const [expandedTransactions, setExpandedTransactions] = useState({});
+  const [expandedDispatchers, setExpandedDispatchers] = useState({});
+  const [expandedVehicles, setExpandedVehicles] = useState({});
 
-  const closeDialog = () => setDialog(null);
-
-  const openDialog = ({
-    title,
-    message,
-    variant = 'info',
-    actions,
-    persistent = false,
-    size = 'md',
-  }) => {
-    setDialog({
-      title,
-      message,
-      variant,
-      persistent,
-      size,
-      actions:
-        actions && actions.length
-          ? actions
-          : [
-              {
-                label: 'OK',
-                onClick: closeDialog,
-                variant: 'primary',
-              },
-            ],
-    });
-  };
-
-  const renderDialog = () => {
-    if (!dialog) return null;
-    const variant = dialog.variant || 'info';
-    const size = dialog.size || 'md';
-    const variantStyles = {
-      success: {
-        header: 'text-emerald-300',
-        badge: 'bg-emerald-500/10 border-emerald-500/30',
-        bg: 'bg-emerald-500/5',
-      },
-      error: {
-        header: 'text-red-300',
-        badge: 'bg-red-500/10 border-red-500/30',
-        bg: 'bg-red-500/5',
-      },
-      warning: {
-        header: 'text-amber-300',
-        badge: 'bg-amber-500/10 border-amber-500/30',
-        bg: 'bg-amber-500/5',
-      },
-      info: {
-        header: 'text-blue-300',
-        badge: 'bg-blue-500/10 border-blue-500/30',
-        bg: 'bg-blue-500/5',
-      },
-    };
-    const variantIcons = {
-      success: CheckCircle2,
-      error: AlertCircle,
-      warning: AlertCircle,
-      info: Info,
-    };
-    const actionClassMap = {
-      primary: 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:from-purple-600 hover:to-blue-600 shadow-lg',
-      secondary: 'bg-slate-800 text-slate-100 hover:bg-slate-700 border border-slate-700',
-      danger: 'bg-red-600 text-white hover:bg-red-500 shadow-lg',
-      ghost: 'bg-transparent border border-slate-700 text-slate-300 hover:bg-slate-800',
-    };
-    const sizeClasses = {
-      sm: 'max-w-sm',
-      md: 'max-w-md',
-      lg: 'max-w-lg',
-      xl: 'max-w-xl',
-      full: 'max-w-4xl',
-    };
-    const IconComponent = variantIcons[variant] || Info;
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
-        <div className={`w-full ${sizeClasses[size]} rounded-3xl border border-slate-800/50 bg-slate-900/95 p-8 shadow-2xl backdrop-blur-xl ${variantStyles[variant]?.bg || ''}`}>
-          <div className={`flex items-center justify-between ${variantStyles[variant]?.header || 'text-slate-200'}`}>
-            <div className="flex items-center gap-3 text-sm font-bold uppercase tracking-wider">
-              <div className={`rounded-xl p-2 ${variantStyles[variant]?.badge || 'border-slate-800'}`}>
-                <IconComponent className="h-5 w-5" />
-              </div>
-              {dialog.title}
-            </div>
-            {!dialog.persistent && (
-              <button
-                onClick={closeDialog}
-                className="rounded-xl border border-slate-800/50 p-2 text-slate-400 hover:text-white hover:border-slate-600 hover:bg-slate-800/50 transition-all"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            )}
-          </div>
-          <div
-            className={`mt-6 rounded-2xl border p-6 text-sm leading-relaxed ${variantStyles[variant]?.badge || 'border-slate-800/50 text-slate-300'}`}
-          >
-            <p className="text-slate-200 whitespace-pre-line">{dialog.message}</p>
-          </div>
-          <div className="mt-8 flex flex-wrap gap-3 justify-end">
-            {dialog.actions.map((action, index) => (
-              <button
-                key={`dialog-action-${index}`}
-                onClick={() => action.onClick ? action.onClick() : closeDialog()}
-                className={`rounded-xl px-6 py-3 text-sm font-bold transition-all transform hover:scale-105 ${actionClassMap[action.variant || 'primary']}`}
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const dialogOverlay = renderDialog();
-
-  // Payment screenshot upload handler
-  const handlePaymentScreenshotUpload = async (tripId, file) => {
-    if (!file) return;
-    
-    const formData = new FormData();
-    formData.append('screenshot', file);
-    formData.append('trip_id', tripId);
-    formData.append('payment_date', new Date().toISOString());
-    
-    try {
-      const response = await api.post(`/api/trips/${tripId}/payment-screenshot`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      
-      setPaymentScreenshots(prev => ({
-        ...prev,
-        [tripId]: {
-          url: response.data.screenshot_url,
-          uploaded_at: response.data.uploaded_at,
-          payment_date: response.data.payment_date,
-        }
-      }));
-      
-      openDialog({
-        title: 'Payment Screenshot Uploaded',
-        message: 'Payment screenshot has been successfully attached to the trip.',
-        variant: 'success',
-        size: 'sm'
-      });
-    } catch (error) {
-      openDialog({
-        title: 'Upload Failed',
-        message: error.response?.data?.detail || 'Failed to upload payment screenshot',
-        variant: 'error',
-        size: 'sm'
-      });
-    }
-  };
-
-  // Error chat functionality
-  const sendErrorChatMessage = async (tripId, message) => {
-    if (!message.trim()) return;
-    
-    setChatLoading(true);
-    try {
-      const response = await api.post(`/api/trips/${tripId}/error-chat`, {
-        message: message.trim(),
-        timestamp: new Date().toISOString(),
-      });
-      
-      setErrorChatMessages(prev => ({
-        ...prev,
-        [tripId]: [...(prev[tripId] || []), response.data]
-      }));
-      
-      setChatMessage('');
-    } catch (error) {
-      openDialog({
-        title: 'Message Failed',
-        message: error.response?.data?.detail || 'Failed to send message',
-        variant: 'error',
-        size: 'sm'
-      });
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
-  // Check if database is seeded on mount
-  useEffect(() => {
-    const checkDatabaseStatus = async () => {
-      try {
-        // Try to fetch users to check if database is seeded
-        await api.post('/api/auth/quick-login/SUPER_ADMIN');
-        setIsDbSeeded(true);
-      } catch (error) {
-        if (error.response?.status === 404 || error.response?.status === 500) {
-          setIsDbSeeded(false);
-        }
-      }
-    };
-    if (!isAuthenticated) {
-      checkDatabaseStatus();
-    }
-  }, []);
-
-  // Handle database seeding
-  const handleSeedDatabase = async () => {
-    setSeedLoading(true);
-    try {
-      const response = await api.post('/api/seed-database', null, {
-        params: { tenant_name: seedTenantName }
-      });
-      openDialog({
-        title: 'Database Ready',
-        message: `${response.data.message}\n\nYou can now log in with the quick login buttons.`,
-        variant: 'success',
-        actions: [
-          {
-            label: 'Enter App',
-            variant: 'primary',
-            onClick: () => {
-              closeDialog();
-              setShowLanding(false);
-              window.location.reload();
-            },
-          },
-        ],
-      });
-    } catch (error) {
-      openDialog({
-        title: 'Seeding failed',
-        message: error.response?.data?.detail || 'Failed to seed database',
-        variant: 'error',
-      });
-    } finally {
-      setSeedLoading(false);
-    }
-  };
+  // Database seeding state
+  const [seedingStatus, setSeedingStatus] = useState(null);
+  const [showSeedingModal, setShowSeedingModal] = useState(false);
 
   // Authentication handlers
   const handleLogin = async (e) => {
@@ -626,7 +322,7 @@ function App() {
         }
       } else if (error.message) {
         if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
-          errorMessage = `Cannot connect to server. Please ensure the backend is reachable at ${API_BASE_URL}`;
+          errorMessage = 'Cannot connect to server. Please ensure the backend is running on http://localhost:5060';
         } else {
           errorMessage = error.message;
         }
@@ -634,6 +330,29 @@ function App() {
       
       setAuthError(errorMessage);
       console.error('Registration error:', error.response?.data || error);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleQuickLogin = async (role) => {
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const response = await api.post(`/api/auth/quick-login/${role}`);
+      const { access_token, user } = response.data;
+      localStorage.setItem('auth_token', access_token);
+      localStorage.setItem('auth_user', JSON.stringify(user));
+      setIsAuthenticated(true);
+      setCurrentUser(user);
+      setAuthError('');
+    } catch (error) {
+      let errorMessage = 'Quick login failed. Please try again.';
+      if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      }
+      setAuthError(errorMessage);
+      console.error('Quick login error:', error);
     } finally {
       setAuthLoading(false);
     }
@@ -648,29 +367,44 @@ function App() {
     window.location.reload();
   };
 
-  const handleQuickLogin = async (role) => {
-    setAuthError('');
-    setAuthLoading(true);
+  // Database seeding handlers
+  const handleSeedDatabase = async () => {
     try {
-      const response = await api.post(`/api/auth/quick-login/${role.toLowerCase()}`);
-      const { access_token, user } = response.data;
-      localStorage.setItem('auth_token', access_token);
-      localStorage.setItem('auth_user', JSON.stringify(user));
-      setIsAuthenticated(true);
-      setCurrentUser(user);
-      setShowLogin(false);
-      window.location.reload();
-    } catch (error) {
-      let errorMessage = 'Quick login failed. Please ensure seed data is loaded.';
-      if (axios.isAxiosError(error)) {
-        if (error.response?.data?.detail) {
-          errorMessage = error.response.data.detail;
+      const response = await api.post('/api/admin/seed-database');
+      setSeedingStatus({
+        is_running: true,
+        progress: 0,
+        message: response.data.message,
+        completed: false,
+        error: null
+      });
+      setShowSeedingModal(true);
+      
+      // Start polling for status
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await api.get('/api/admin/seed-database/status');
+          setSeedingStatus(statusResponse.data);
+          
+          if (!statusResponse.data.is_running) {
+            clearInterval(pollInterval);
+          }
+        } catch (error) {
+          console.error('Error polling seeding status:', error);
+          clearInterval(pollInterval);
         }
-      }
-      setAuthError(errorMessage);
-      console.error('Quick login error:', error.response?.data || error);
-    } finally {
-      setAuthLoading(false);
+      }, 2000); // Poll every 2 seconds
+      
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to start database seeding');
+      console.error('Seeding error:', error);
+    }
+  };
+
+  const closeSeedingModal = () => {
+    setShowSeedingModal(false);
+    if (seedingStatus?.completed) {
+      window.location.reload(); // Reload to show new data
     }
   };
 
@@ -723,70 +457,6 @@ function App() {
     };
   }, [summaryData]);
 
-  const backendHost = useMemo(() => getBackendHost(API_BASE_URL), []);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const checkApiAvailability = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/`, { timeout: 5000 });
-        if (!isMounted) return;
-        setApiStatus({
-          state: 'online',
-          label: 'Online',
-          message: response.data?.message || 'Backend reachable',
-          target: backendHost,
-          timestamp: Date.now(),
-        });
-      } catch (error) {
-        if (!isMounted) return;
-        const detail = error.response?.data?.detail || error.message || 'Unavailable';
-        setApiStatus({
-          state: 'offline',
-          label: 'Offline',
-          message: detail,
-          target: backendHost,
-          timestamp: Date.now(),
-        });
-      }
-    };
-
-    checkApiAvailability();
-    const intervalId = setInterval(checkApiAvailability, 30000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, [backendHost]);
-
-  // Fetch saved payment methods when trip is selected
-  useEffect(() => {
-    if (selectedTrip && selectedTrip.customer?.id) {
-      api.get(`/api/customers/${selectedTrip.customer.id}/payment-methods`)
-        .then(response => {
-          setSavedPaymentMethods(response.data);
-        })
-        .catch(error => {
-          console.error('Error fetching saved payment methods:', error);
-        });
-    }
-  }, [selectedTrip]);
-
-  // Fetch tenants if user is Super Admin
-  useEffect(() => {
-    if (isAuthenticated && currentUser?.role === 'SUPER_ADMIN') {
-      api.get('/api/super-admin/tenants')
-        .then(response => {
-          setTenants(response.data);
-        })
-        .catch(error => {
-          console.error('Error fetching tenants:', error);
-        });
-    }
-  }, [isAuthenticated, currentUser]);
-
   useEffect(() => {
     if (view === 'customers') {
       setLoading(true);
@@ -796,16 +466,8 @@ function App() {
         .finally(() => setLoading(false));
     } else if (view === 'trips') {
       setLoading(true);
-      Promise.all([
-        api.get('/api/transactions/'),
-        api.get('/api/customers/'),
-        api.get('/api/drivers/'),
-      ])
-        .then(([tripsRes, customersRes, driversRes]) => {
-          setTrips(tripsRes.data);
-          setCustomers(customersRes.data);
-          setDrivers(driversRes.data);
-        })
+      api.get('/api/transactions/')
+        .then(res => setTrips(res.data))
         .catch(err => console.error('Failed to fetch trips:', err))
         .finally(() => setLoading(false));
     } else if (view === 'drivers') {
@@ -1036,14 +698,137 @@ function App() {
     }
   };
 
+  // Fetch analytics data based on report type and time filter
+  const fetchAnalyticsData = async (reportType, timeFilter) => {
+    setAnalyticsLoading(true);
+    console.log('Fetching analytics:', { reportType, timeFilter });
+    
+    try {
+      const payload = {
+        date_range: {
+          range_type: timeFilter,
+          start_date: null,
+          end_date: null
+        },
+        tenant_id: null,
+        driver_id: null,
+        customer_id: null,
+        dispatcher_id: null
+      };
+
+      let endpoint = '';
+      switch(reportType) {
+        case 'driver':
+          endpoint = '/api/analytics/drivers/comprehensive';
+          break;
+        case 'customer':
+          endpoint = '/api/reports/detailed/customers';
+          break;
+        case 'dispatcher':
+          endpoint = '/api/reports/detailed/dispatchers';
+          break;
+        case 'admin':
+          endpoint = '/api/reports/detailed/admin';
+          break;
+        case 'super_admin':
+          endpoint = '/api/reports/detailed/super-admin';
+          break;
+        case 'transaction':
+          endpoint = '/api/reports/transactions';
+          break;
+        case 'vehicle':
+          endpoint = '/api/reports/vehicles';
+          break;
+        case 'overview':
+          endpoint = '/api/reports/analytics';
+          break;
+        default:
+          console.error('Unknown report type:', reportType);
+          return;
+      }
+
+      console.log('Calling endpoint:', endpoint, 'with payload:', payload);
+      const response = await api.post(endpoint, payload);
+      console.log('Analytics response:', response.data);
+      setAnalyticsData(response.data);
+      
+      // Show helpful message if no data
+      if (response.data && (
+        (response.data.drivers && response.data.drivers.length === 0) ||
+        (response.data.summary && response.data.summary.total_bookings === 0)
+      )) {
+        console.warn('No data found for the selected period. You may need to create some bookings first.');
+      }
+    } catch (error) {
+      console.error('Failed to fetch analytics:', error);
+      console.error('Error details:', error.response?.data);
+      
+      // Don't set error state if it's a 401 (page will reload via interceptor)
+      if (error.response?.status !== 401) {
+        setAnalyticsData({
+          summary: {},
+          drivers: [],
+          error: true,
+          message: error.response?.data?.detail || 'Failed to fetch analytics data. Please try again.'
+        });
+      }
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  // Handle analytics card click
+  const handleAnalyticsCardClick = (reportType) => {
+    setSelectedAnalyticsReport(reportType);
+    fetchAnalyticsData(reportType, analyticsTimeFilter);
+  };
+
+  // Handle time filter change
+  const handleAnalyticsTimeFilterChange = (newTimeFilter) => {
+    setAnalyticsTimeFilter(newTimeFilter);
+    if (selectedAnalyticsReport) {
+      fetchAnalyticsData(selectedAnalyticsReport, newTimeFilter);
+    }
+  };
+
+  // Toggle expandable sections for drill-down
+  const toggleDriverExpand = (driverId) => {
+    setExpandedDrivers(prev => ({
+      ...prev,
+      [driverId]: !prev[driverId]
+    }));
+  };
+
+  const toggleCustomerExpand = (customerId) => {
+    setExpandedCustomers(prev => ({
+      ...prev,
+      [customerId]: !prev[customerId]
+    }));
+  };
+
+  const toggleTransactionExpand = (transactionId) => {
+    setExpandedTransactions(prev => ({
+      ...prev,
+      [transactionId]: !prev[transactionId]
+    }));
+  };
+
+  const toggleDispatcherExpand = (dispatcherId) => {
+    setExpandedDispatchers(prev => ({
+      ...prev,
+      [dispatcherId]: !prev[dispatcherId]
+    }));
+  };
+
+  const toggleVehicleExpand = (vehicleId) => {
+    setExpandedVehicles(prev => ({
+      ...prev,
+      [vehicleId]: !prev[vehicleId]
+    }));
+  };
+
   // Login/Register UI - Show if not authenticated
   if (!isAuthenticated) {
-    const apiStatusStyles = {
-      online: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
-      offline: 'bg-red-500/10 border-red-500/30 text-red-300',
-      checking: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
-    };
-
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
@@ -1052,24 +837,7 @@ function App() {
               <Car className="h-8 w-8 text-purple-300" />
               <span className="text-xl uppercase tracking-[0.2em] font-semibold text-purple-300">DGDS CLONE</span>
             </div>
-
-            <div
-              className={`mb-6 flex flex-col items-center gap-1 rounded-xl border px-4 py-3 text-xs font-medium text-center ${apiStatusStyles[apiStatus.state]}`}
-            >
-              <div className="flex items-center gap-2 uppercase tracking-widest">
-                <span>API Status</span>
-                {apiStatus.state === 'online' && <CheckCircle2 className="h-4 w-4" />}
-                {apiStatus.state === 'offline' && <AlertCircle className="h-4 w-4" />}
-                {apiStatus.state === 'checking' && <RefreshCw className="h-4 w-4 animate-spin" />}
-              </div>
-              <div className="text-[11px] text-slate-400">
-                {apiStatus.label}: {apiStatus.message}
-              </div>
-              <div className="text-[11px] text-slate-500">
-                Target: {apiStatus.target} · Last checked {new Date(apiStatus.timestamp).toLocaleTimeString()}
-              </div>
-            </div>
-
+            
             <div className="flex gap-2 mb-6">
               <button
                 onClick={() => setShowLogin(true)}
@@ -1091,49 +859,6 @@ function App() {
               >
                 Register
               </button>
-            </div>
-
-            {/* Quick Login Section */}
-            <div className="mb-6 p-4 rounded-xl bg-slate-800/50 border border-slate-700">
-              <p className="text-xs uppercase tracking-wider text-slate-400 mb-3 text-center">Quick Login (Test Accounts)</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => handleQuickLogin('CUSTOMER')}
-                  disabled={authLoading}
-                  className="py-2 px-3 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed border border-blue-500/30"
-                >
-                  👤 Customer
-                </button>
-                <button
-                  onClick={() => handleQuickLogin('DRIVER')}
-                  disabled={authLoading}
-                  className="py-2 px-3 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500/30"
-                >
-                  🚗 Driver
-                </button>
-                <button
-                  onClick={() => handleQuickLogin('DISPATCHER')}
-                  disabled={authLoading}
-                  className="py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed border border-amber-500/30"
-                >
-                  📞 Dispatcher
-                </button>
-                <button
-                  onClick={() => handleQuickLogin('ADMIN')}
-                  disabled={authLoading}
-                  className="py-2 px-3 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed border border-purple-500/30"
-                >
-                  ⚙️ Admin
-                </button>
-                <button
-                  onClick={() => handleQuickLogin('SUPER_ADMIN')}
-                  disabled={authLoading}
-                  className="py-2 px-3 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed border border-red-500/30 col-span-2"
-                >
-                  👑 Super Admin
-                </button>
-              </div>
-              <p className="text-xs text-slate-500 mt-2 text-center">One-click login with seed accounts</p>
             </div>
 
             {showLogin ? (
@@ -1280,158 +1005,50 @@ function App() {
                 </button>
               </form>
             )}
-          </div>
-        </div>
-        {dialogOverlay}
-      </div>
-    );
-  }
 
-  // Landing Page Component
-  if (showLanding) {
-    const apiStatusStyles = {
-      online: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
-      offline: 'bg-red-500/10 border-red-500/30 text-red-300',
-      checking: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
-    };
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 text-slate-100">
-        <div className="mx-auto max-w-6xl px-4 py-10">
-          <header className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="h-14 w-14 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center">
-                <Car className="h-8 w-8 text-purple-300" />
-              </div>
-              <div>
-                <h1 className="text-3xl md:text-4xl font-semibold text-white">DGDS Clone</h1>
-                <p className="text-slate-400">Fleet-ready ride operations for Dispatchers, Drivers, and Customers</p>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div
-                className={`flex flex-col gap-1 rounded-2xl border px-4 py-3 text-xs font-medium text-center ${apiStatusStyles[apiStatus.state]}`}
-              >
-                <div className="flex items-center justify-center gap-2 uppercase tracking-widest">
-                  <span>API</span>
-                  {apiStatus.state === 'online' && <CheckCircle2 className="h-4 w-4" />}
-                  {apiStatus.state === 'offline' && <AlertCircle className="h-4 w-4" />}
-                  {apiStatus.state === 'checking' && <RefreshCw className="h-4 w-4 animate-spin" />}
-                </div>
-                <span className="text-[11px] text-slate-300">{apiStatus.label}: {apiStatus.message}</span>
-                <span className="text-[11px] text-slate-500">{apiStatus.target}</span>
-              </div>
-              <button
-                onClick={() => setShowLanding(false)}
-                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-purple-500 to-blue-500 text-white font-semibold hover:from-purple-600 hover:to-blue-600 transition"
-              >
-                Enter App
-              </button>
-              <button
-                onClick={() => {
-                  setShowLanding(false);
-                  setShowLogin(true);
-                }}
-                className="px-5 py-3 rounded-2xl bg-slate-900/60 border border-slate-800 text-slate-200 hover:bg-slate-900 transition"
-              >
-                Login / Demo
-              </button>
-            </div>
-          </header>
-
-          <section className="mt-10 grid gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 md:p-8 shadow-xl shadow-purple-500/10">
-              <h2 className="text-2xl font-semibold text-white">All-in-one ride management</h2>
-              <p className="mt-2 text-slate-400">
-                Multi-tenant, role-based operations: customer onboarding, driver/dispatcher management, bookings, payments, and reporting.
-              </p>
-
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div className="flex items-center gap-2 text-emerald-300 font-semibold">
-                    <CheckCircle2 className="h-5 w-5" />
-                    Booking workflow
-                  </div>
-                  <p className="mt-2 text-sm text-slate-400">Create trips, assign driver + vehicle, track statuses end-to-end.</p>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div className="flex items-center gap-2 text-blue-300 font-semibold">
-                    <Users className="h-5 w-5" />
-                    Customer CRM
-                  </div>
-                  <p className="mt-2 text-sm text-slate-400">Addresses, contact numbers, vehicles per customer, and quick onboarding.</p>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div className="flex items-center gap-2 text-purple-300 font-semibold">
-                    <Car className="h-5 w-5" />
-                    Driver ops
-                  </div>
-                  <p className="mt-2 text-sm text-slate-400">Driver directory, phone, addresses, availability and reporting.</p>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div className="flex items-center gap-2 text-amber-300 font-semibold">
-                    <CreditCard className="h-5 w-5" />
-                    Payments + reports
-                  </div>
-                  <p className="mt-2 text-sm text-slate-400">Commission splits, paid/unpaid tracking, summary by driver/customer/dispatcher.</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 md:p-8 shadow-xl shadow-cyan-500/10">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="text-xl font-semibold text-white">Quick setup</h3>
-                  <p className="mt-1 text-sm text-slate-400">Seed a tenant + sample data to explore all features instantly.</p>
-                </div>
-                <div className={`px-3 py-1 rounded-xl text-xs font-semibold border ${isDbSeeded ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
-                  {isDbSeeded ? 'DB READY' : 'DB NOT SEEDED'}
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">Organization Name</label>
-                  <input
-                    type="text"
-                    value={seedTenantName}
-                    onChange={(e) => setSeedTenantName(e.target.value)}
-                    className="w-full px-4 py-3 rounded-2xl bg-slate-950/50 border border-slate-800 text-white focus:outline-none focus:border-purple-500"
-                    placeholder="e.g., DGDS Clone, Acme Transport"
-                  />
-                </div>
-
+            {/* Quick Login Section */}
+            <div className="mt-6 pt-6 border-t border-slate-800">
+              <p className="text-xs text-slate-400 mb-3 text-center">Quick Login (Test Accounts)</p>
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={handleSeedDatabase}
-                  disabled={seedLoading || !seedTenantName.trim()}
-                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-purple-500 to-blue-500 text-white font-semibold hover:from-purple-600 hover:to-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  onClick={() => handleQuickLogin('customer')}
+                  disabled={authLoading}
+                  className="px-3 py-2 rounded-lg bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition text-xs font-medium disabled:opacity-50"
                 >
-                  {seedLoading ? (
-                    <>
-                      <RefreshCw className="h-5 w-5 animate-spin" />
-                      Seeding Database...
-                    </>
-                  ) : (
-                    <>
-                      <Database className="h-5 w-5" />
-                      Seed Database
-                    </>
-                  )}
+                  👤 Customer
                 </button>
-
-                <div className="rounded-2xl bg-slate-950/40 border border-slate-800 p-4">
-                  <p className="text-xs text-slate-400">
-                    Default password for seeded users: <span className="text-purple-300 font-semibold">password123</span>
-                  </p>
-                </div>
+                <button
+                  onClick={() => handleQuickLogin('driver')}
+                  disabled={authLoading}
+                  className="px-3 py-2 rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition text-xs font-medium disabled:opacity-50"
+                >
+                  🚗 Driver
+                </button>
+                <button
+                  onClick={() => handleQuickLogin('dispatcher')}
+                  disabled={authLoading}
+                  className="px-3 py-2 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition text-xs font-medium disabled:opacity-50"
+                >
+                  📞 Dispatcher
+                </button>
+                <button
+                  onClick={() => handleQuickLogin('admin')}
+                  disabled={authLoading}
+                  className="px-3 py-2 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition text-xs font-medium disabled:opacity-50"
+                >
+                  ⚙️ Admin
+                </button>
+                <button
+                  onClick={() => handleQuickLogin('super_admin')}
+                  disabled={authLoading}
+                  className="col-span-2 px-3 py-2 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition text-xs font-medium disabled:opacity-50"
+                >
+                  👑 Super Admin
+                </button>
               </div>
+              <p className="text-xs text-slate-500 mt-2 text-center">One-click login with seed accounts</p>
             </div>
-          </section>
-
-          <footer className="mt-10 text-center text-xs text-slate-500">
-            <p>Responsive UI for mobile, tablet, laptop, and desktop.</p>
-          </footer>
+          </div>
         </div>
       </div>
     );
@@ -1441,16 +1058,9 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
       {/* Left Sidebar */}
       <aside className="w-64 min-h-screen bg-slate-900 border-r border-slate-800 p-4 flex flex-col gap-2">
-        <div className="flex items-center justify-between mb-4 px-2">
-          <div className="flex items-center gap-3 text-purple-300">
-            <Car className="h-7 w-7" />
-            <span className="text-sm uppercase tracking-[0.2em] font-semibold">DGDS CLONE</span>
-          </div>
-        </div>
-        
-        {/* Language Switcher */}
-        <div className="mb-4 px-2">
-          <LanguageSwitcher />
+        <div className="flex items-center gap-3 text-purple-300 mb-6 px-2">
+          <Car className="h-7 w-7" />
+          <span className="text-sm uppercase tracking-[0.2em] font-semibold">DGDS CLONE</span>
         </div>
         
         {/* Quick Actions */}
@@ -1578,73 +1188,31 @@ function App() {
                 : 'text-purple-300 hover:bg-slate-800'
             }`}
           >
-            <Database className="h-4 w-4" />
-            {t('nav.analytics')}
+            <DollarSign className="h-4 w-4" />
+            Analytics
           </button>
         </div>
-        
-        {/* Tenant Management - Only for Super Admin */}
-        {currentUser && currentUser.role === 'SUPER_ADMIN' && (
-          <div className="border-t border-slate-800 pt-4">
-            <p className="text-xs uppercase tracking-wider text-slate-500 px-2 mb-2">Tenant Management</p>
-            <button
-              onClick={() => setShowTenantModal(true)}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition bg-purple-500/10 text-purple-300 hover:bg-purple-500/20"
-            >
-              <Plus className="h-4 w-4" />
-              Create Tenant
-            </button>
-            <button
-              onClick={() => setView('tenants')}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
-                view === 'tenants'
-                  ? 'bg-purple-500 text-white'
-                  : 'text-purple-300 hover:bg-slate-800'
-              }`}
-            >
-              <Users className="h-4 w-4" />
-              Manage Tenants ({tenants.length})
-            </button>
-          </div>
-        )}
         
         {/* User Info & Logout */}
         {currentUser && (
           <div className="border-t border-slate-800 pt-4 mt-auto">
-            {/* Active Tenant Display */}
-            <div className="rounded-xl bg-slate-800/50 p-3 mb-3">
-              <p className="text-xs text-slate-400 mb-1">Active Tenant</p>
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-emerald-300 truncate">
-                  {activeTenant?.name || currentUser?.tenant?.name || 'DGDS Clone'}
-                </p>
-                {currentUser.role === 'SUPER_ADMIN' && (
-                  <button
-                    onClick={() => setShowTenantPicker(true)}
-                    className="text-xs text-purple-300 hover:text-purple-200 underline"
-                  >
-                    Switch
-                  </button>
-                )}
-              </div>
-              <p className="text-[10px] text-slate-500 mt-1">
-                ID: {activeTenant?.id || currentUser?.tenant?.id || currentUser?.tenant_id || 'N/A'}
-              </p>
-            </div>
             <div className="rounded-xl bg-slate-800/50 p-3 mb-3">
               <p className="text-xs text-slate-400 mb-1">Logged in as</p>
               <p className="text-sm font-semibold text-white truncate">{currentUser.email}</p>
               <p className="text-xs text-purple-300 mt-1">{currentUser.role}</p>
             </div>
-            {currentUser.role === 'SUPER_ADMIN' && (
+            
+            {/* Seed Database Button - Admin Only */}
+            {(currentUser.role === 'admin' || currentUser.role === 'super_admin') && (
               <button
-                onClick={() => setShowResetModal(true)}
-                className="w-full py-2 px-3 rounded-xl text-sm font-medium transition bg-orange-500/10 text-orange-300 hover:bg-orange-500/20 flex items-center justify-center gap-2 mb-2"
+                onClick={handleSeedDatabase}
+                className="w-full py-2 px-3 rounded-xl text-sm font-medium transition bg-green-500/10 text-green-300 hover:bg-green-500/20 flex items-center justify-center gap-2 mb-2"
               >
-                <RefreshCw className="h-4 w-4" />
-                Reset Database
+                <Plus className="h-4 w-4" />
+                Seed Database
               </button>
             )}
+            
             <button
               onClick={handleLogout}
               className="w-full py-2 px-3 rounded-xl text-sm font-medium transition bg-red-500/10 text-red-300 hover:bg-red-500/20 flex items-center justify-center gap-2"
@@ -1681,6 +1249,7 @@ function App() {
             {view === 'addDriver' && 'Add New Driver'}
             {view === 'vehicles' && 'All Vehicles'}
             {view === 'summary' && 'Financial Summary'}
+            {view === 'analytics' && 'Reports & Analytics'}
           </h1>
           <p className="mt-1 text-slate-400 text-sm">
             {view === 'register' && 'Capture customer master data before dispatchers start live bookings.'}
@@ -1691,6 +1260,7 @@ function App() {
             {view === 'booking' && 'Create a new booking for a customer.'}
             {view === 'addDriver' && 'Register a new driver in the system.'}
             {view === 'vehicles' && 'Manage customer vehicles for bookings.'}
+            {view === 'analytics' && 'Generate comprehensive reports with commission breakdown.'}
             {view === 'summary' && 'View financial reports and commission breakdowns.'}
           </p>
         </header>
@@ -2120,82 +1690,6 @@ function App() {
           </div>
         )}
 
-        {view === 'tenants' && (
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-purple-500/10">
-            <h2 className="mb-6 text-2xl font-semibold text-white">Manage Tenants</h2>
-            <p className="text-sm text-slate-400 mb-6">Create and manage tenant organizations. Each tenant has isolated data.</p>
-            {tenants.length === 0 ? (
-              <div className="text-center py-12">
-                <Building className="h-16 w-16 mx-auto text-slate-600 mb-4" />
-                <p className="text-slate-400 mb-4">No tenants created yet</p>
-                <button
-                  onClick={() => setShowTenantModal(true)}
-                  className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition"
-                >
-                  Create First Tenant
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {tenants.map((tenant) => (
-                  <div key={tenant.id} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-lg font-semibold text-white">{tenant.name}</h3>
-                          <span className={`px-2 py-0.5 rounded-lg text-xs font-medium ${
-                            tenant.is_active ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
-                          }`}>
-                            {tenant.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-purple-500/20 text-purple-300">
-                            {tenant.code}
-                          </span>
-                        </div>
-                        {tenant.description && (
-                          <p className="text-sm text-slate-400 mt-2">{tenant.description}</p>
-                        )}
-                        <div className="mt-3 grid grid-cols-4 gap-4 text-xs">
-                          <div>
-                            <span className="text-slate-500">Customers:</span>
-                            <span className="ml-2 text-slate-300 font-medium">{tenant.customer_count}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500">Drivers:</span>
-                            <span className="ml-2 text-slate-300 font-medium">{tenant.driver_count}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500">Dispatchers:</span>
-                            <span className="ml-2 text-slate-300 font-medium">{tenant.dispatcher_count}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500">Transactions:</span>
-                            <span className="ml-2 text-slate-300 font-medium">{tenant.transaction_count}</span>
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-2">
-                          Created: {new Date(tenant.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            setSelectedTenant(tenant);
-                            setShowTenantResetModal(true);
-                          }}
-                          className="px-3 py-1 rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20 transition text-sm"
-                        >
-                          Reset Data
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         {view === 'trips' && (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-blue-500/10">
             <h2 className="mb-6 text-2xl font-semibold text-white">All Trips</h2>
@@ -2206,15 +1700,12 @@ function App() {
             ) : (
               <div className="space-y-4">
                 {trips.map((trip) => {
-                  const resolvedCustomer = trip.customer || customers.find(c => c.id === trip.customer_id);
-                  const resolvedDriver = trip.driver || drivers.find(d => d.id === trip.driver_id);
-
                   // Get customer primary phone
-                  const customerPhone = resolvedCustomer?.contact_numbers?.find(c => c.is_primary)?.phone_number ||
-                                       resolvedCustomer?.contact_numbers?.[0]?.phone_number;
+                  const customerPhone = trip.customer?.contact_numbers?.find(c => c.is_primary)?.phone_number || 
+                                       trip.customer?.contact_numbers?.[0]?.phone_number;
                   // Get driver phone
-                  const driverPhone = resolvedDriver?.contact_numbers?.find(c => c.is_primary)?.phone_number ||
-                                     resolvedDriver?.contact_numbers?.[0]?.phone_number;
+                  const driverPhone = trip.driver?.contact_numbers?.find(c => c.is_primary)?.phone_number || 
+                                     trip.driver?.contact_numbers?.[0]?.phone_number;
                   
                   return (
                   <div key={trip.id} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
@@ -2230,18 +1721,8 @@ function App() {
                           }`}>
                             {trip.status}
                           </span>
-                          {/* Payment Status Badges */}
-                          {trip.is_paid ? (
-                            <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-emerald-500/20 text-emerald-300">✓ PAID</span>
-                          ) : trip.status === 'COMPLETED' ? (
+                          {!trip.is_paid && trip.status === 'COMPLETED' && (
                             <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-red-500/20 text-red-300">UNPAID</span>
-                          ) : trip.status === 'CANCELLED' ? (
-                            <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-orange-500/20 text-orange-300">CANCELLED</span>
-                          ) : trip.payments && trip.payments.some(p => p.status === 'PENDING') ? (
-                            <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-300">PENDING</span>
-                          ) : null}
-                          {trip.payments && trip.payments.some(p => p.status === 'FAILED') && !trip.is_paid && (
-                            <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-red-600/20 text-red-400">PAYMENT FAILED</span>
                           )}
                         </div>
                         
@@ -2249,7 +1730,7 @@ function App() {
                         <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                           <div className="flex items-center gap-2">
                             <span className="text-slate-500">Customer:</span>
-                            <span className="text-white">{trip.customer_name || resolvedCustomer?.name || 'N/A'}</span>
+                            <span className="text-white">{trip.customer?.name || 'N/A'}</span>
                             {customerPhone && (
                               <a href={`tel:${customerPhone}`} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-xs hover:bg-emerald-500/30">
                                 <Phone className="w-3 h-3" />
@@ -2259,7 +1740,7 @@ function App() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-slate-500">Driver:</span>
-                            <span className="text-white">{trip.driver_name || resolvedDriver?.name || 'N/A'}</span>
+                            <span className="text-white">{trip.driver?.name || 'N/A'}</span>
                             {driverPhone && (
                               <a href={`tel:${driverPhone}`} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-xs hover:bg-purple-500/30">
                                 <Phone className="w-3 h-3" />
@@ -2276,7 +1757,7 @@ function App() {
                           </span>
                           <span className="flex items-center gap-1">
                             <Calendar className="h-4 w-4 text-blue-400" />
-                            {trip.created_at ? new Date(trip.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '-'}
+                            {new Date(trip.created_at).toLocaleDateString()}
                           </span>
                           {trip.ride_duration_hours && (
                             <span className="text-slate-400">{trip.ride_duration_hours}h ride</span>
@@ -2287,61 +1768,13 @@ function App() {
                           {trip.pickup_location} → {trip.destination_location}
                         </p>
                       </div>
-                      <div className="flex flex-col gap-2">
-                        {/* Payment Screenshot Indicator */}
-                        {paymentScreenshots[trip.id] ? (
-                          <div className="flex items-center gap-2 text-xs text-emerald-300">
-                            <FileImage className="h-3 w-3" />
-                            <span>Payment verified</span>
-                          </div>
-                        ) : trip.status === 'COMPLETED' && !trip.is_paid ? (
-                          <div className="flex items-center gap-2 text-xs text-red-300">
-                            <AlertCircle className="h-3 w-3" />
-                            <span>Payment pending</span>
-                          </div>
-                        ) : null}
-                        
-                        {/* Action Buttons */}
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => setSelectedTrip(trip)}
-                            className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
-                          >
-                            Manage
-                          </button>
-                          
-                          {/* Payment Screenshot Upload */}
-                          {(trip.status === 'COMPLETED' || trip.status === 'REQUESTED') && (
-                            <button 
-                              onClick={() => {
-                                setSelectedTripForPayment(trip);
-                                setShowPaymentModal(true);
-                              }}
-                              className={`rounded-xl px-3 py-1 text-sm transition flex items-center gap-1 ${
-                                paymentScreenshots[trip.id] 
-                                  ? 'bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' 
-                                  : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
-                              }`}
-                              title={paymentScreenshots[trip.id] ? "View payment screenshot" : "Upload payment screenshot"}
-                            >
-                              <Camera className="h-3 w-3" />
-                              {paymentScreenshots[trip.id] ? 'View' : 'Upload'}
-                            </button>
-                          )}
-                          
-                          {/* Error Chat */}
-                          <button 
-                            onClick={() => {
-                              setSelectedTripForChat(trip);
-                              setShowErrorChat(true);
-                            }}
-                            className="rounded-xl bg-red-500/10 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500/20 flex items-center gap-1"
-                            title="Report issue or error"
-                          >
-                            <MessageSquare className="h-3 w-3" />
-                            Chat
-                          </button>
-                        </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setSelectedTrip(trip)}
+                          className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
+                        >
+                          Manage
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -3022,8 +2455,566 @@ function App() {
         )}
 
         {view === 'analytics' && (
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
-            <AnalyticsDashboard api={api} />
+          <div className="space-y-6">
+            {!selectedAnalyticsReport ? (
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
+                <h2 className="text-2xl font-semibold text-white mb-4">Reports & Analytics</h2>
+                <p className="text-slate-400 mb-6">Click on any card to view detailed drill-down reports</p>
+                
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('overview')}
+                    className="p-6 rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-purple-300 mb-2">📊 Analytics Overview</h3>
+                    <p className="text-sm text-slate-400">Platform-wide statistics and insights</p>
+                  </div>
+                  
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('driver')}
+                    className="p-6 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-blue-300 mb-2">🚗 By Driver</h3>
+                    <p className="text-sm text-slate-400">Driver earnings and performance</p>
+                  </div>
+                  
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('customer')}
+                    className="p-6 rounded-xl border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-green-300 mb-2">👤 By Customer</h3>
+                    <p className="text-sm text-slate-400">Customer spending and bookings</p>
+                  </div>
+                  
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('vehicle')}
+                    className="p-6 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-amber-300 mb-2">🚙 By Vehicle</h3>
+                    <p className="text-sm text-slate-400">Vehicle usage and revenue</p>
+                  </div>
+                  
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('dispatcher')}
+                    className="p-6 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-cyan-300 mb-2">📞 By Dispatcher</h3>
+                    <p className="text-sm text-slate-400">Dispatcher commission breakdown</p>
+                  </div>
+                  
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('transaction')}
+                    className="p-6 rounded-xl border border-pink-500/30 bg-pink-500/10 hover:bg-pink-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-pink-300 mb-2">💰 By Transaction</h3>
+                    <p className="text-sm text-slate-400">Transaction-level details</p>
+                  </div>
+
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('admin')}
+                    className="p-6 rounded-xl border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-orange-300 mb-2">⚙️ By Admin</h3>
+                    <p className="text-sm text-slate-400">Admin commission breakdown</p>
+                  </div>
+
+                  <div 
+                    onClick={() => handleAnalyticsCardClick('super_admin')}
+                    className="p-6 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition cursor-pointer hover:scale-105 transform"
+                  >
+                    <h3 className="text-lg font-semibold text-red-300 mb-2">👑 By Super Admin</h3>
+                    <p className="text-sm text-slate-400">Super admin commission breakdown</p>
+                  </div>
+                </div>
+                
+                <div className="mt-6 p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                  <p className="text-sm text-slate-400">
+                    <strong className="text-white">Commission Structure:</strong> Driver 79% • Dispatcher 18% • Admin 2% • Super Admin 1%
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Header with back button and time filter */}
+                <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <button
+                      onClick={() => {
+                        setSelectedAnalyticsReport(null);
+                        setAnalyticsData(null);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
+                    >
+                      ← Back to Reports
+                    </button>
+                    <h2 className="text-2xl font-semibold text-white">
+                      {selectedAnalyticsReport === 'driver' && '🚗 Driver Analytics'}
+                      {selectedAnalyticsReport === 'customer' && '👤 Customer Analytics'}
+                      {selectedAnalyticsReport === 'dispatcher' && '📞 Dispatcher Analytics'}
+                      {selectedAnalyticsReport === 'admin' && '⚙️ Admin Analytics'}
+                      {selectedAnalyticsReport === 'super_admin' && '👑 Super Admin Analytics'}
+                      {selectedAnalyticsReport === 'transaction' && '💰 Transaction Analytics'}
+                      {selectedAnalyticsReport === 'vehicle' && '🚙 Vehicle Analytics'}
+                      {selectedAnalyticsReport === 'overview' && '📊 Analytics Overview'}
+                    </h2>
+                  </div>
+
+                  {/* Time Period Filter */}
+                  <div className="mb-6">
+                    <label className="block text-sm text-slate-400 mb-3">Time Period</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                      {[
+                        { label: '1 Day', value: '1day' },
+                        { label: '7 Days', value: '7days' },
+                        { label: '14 Days', value: '14days' },
+                        { label: '30 Days', value: '30days' },
+                        { label: '1 Month', value: '1month' },
+                        { label: '3 Months', value: '3months' },
+                        { label: '6 Months', value: '6months' },
+                        { label: '1 Year', value: '1year' },
+                        { label: '5 Years', value: '5years' },
+                        { label: '6 Years', value: '6years' },
+                        { label: 'All Time', value: 'all' }
+                      ].map((period) => (
+                        <button
+                          key={period.value}
+                          onClick={() => handleAnalyticsTimeFilterChange(period.value)}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                            analyticsTimeFilter === period.value
+                              ? 'bg-purple-500 text-white'
+                              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          }`}
+                        >
+                          {period.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Vehicle Transmission Filter - Show only for vehicle analytics */}
+                  {selectedAnalyticsReport === 'vehicle' && (
+                    <div className="mb-6">
+                      <label className="block text-sm text-slate-400 mb-3">Transmission Type</label>
+                      <div className="flex gap-2">
+                        {[
+                          { label: 'All', value: 'all' },
+                          { label: 'Automatic', value: 'automatic' },
+                          { label: 'Manual', value: 'manual' }
+                        ].map((type) => (
+                          <button
+                            key={type.value}
+                            onClick={() => setVehicleTransmissionFilter(type.value)}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                              vehicleTransmissionFilter === type.value
+                                ? 'bg-amber-500 text-white'
+                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            {type.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Loading State */}
+                  {analyticsLoading && (
+                    <div className="text-center py-12">
+                      <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+                      <p className="mt-4 text-slate-400">Loading analytics data...</p>
+                    </div>
+                  )}
+
+                  {/* Analytics Data Display */}
+                  {!analyticsLoading && analyticsData && (
+                    <div className="space-y-6">
+                      {/* Summary Cards */}
+                      {analyticsData.summary && (
+                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                          {Object.entries(analyticsData.summary).map(([key, value]) => (
+                            <div key={key} className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                              <p className="text-xs text-slate-400 uppercase mb-1">
+                                {key.replace(/_/g, ' ')}
+                              </p>
+                              <p className="text-2xl font-bold text-white">
+                                {typeof value === 'number' && (key.includes('amount') || key.includes('revenue') || key.includes('commission') || key.includes('charges'))
+                                  ? `₹${value.toLocaleString()}`
+                                  : typeof value === 'number' ? value.toLocaleString() : value}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Charts Section for Driver Analytics */}
+                      {selectedAnalyticsReport === 'driver' && analyticsData.drivers && analyticsData.drivers.length > 0 && (
+                        <>
+                          {/* Charts Row */}
+                          <div className="grid gap-6 lg:grid-cols-2">
+                            {/* Commission Distribution Pie Chart */}
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                              <h3 className="text-lg font-semibold text-white mb-4">💰 Commission Distribution</h3>
+                              <ResponsiveContainer width="100%" height={300}>
+                                <PieChart>
+                                  <Pie
+                                    data={[
+                                      { name: 'Driver (79%)', value: analyticsData.summary?.total_commission_earned || 0, color: '#10b981' },
+                                      { name: 'Dispatcher (18%)', value: (analyticsData.summary?.total_revenue || 0) * 0.18, color: '#8b5cf6' },
+                                      { name: 'Admin (2%)', value: (analyticsData.summary?.total_revenue || 0) * 0.02, color: '#f59e0b' },
+                                      { name: 'Super Admin (1%)', value: (analyticsData.summary?.total_revenue || 0) * 0.01, color: '#ef4444' }
+                                    ]}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={60}
+                                    outerRadius={100}
+                                    paddingAngle={2}
+                                    dataKey="value"
+                                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                    labelLine={false}
+                                  >
+                                    {[
+                                      { name: 'Driver', color: '#10b981' },
+                                      { name: 'Dispatcher', color: '#8b5cf6' },
+                                      { name: 'Admin', color: '#f59e0b' },
+                                      { name: 'Super Admin', color: '#ef4444' }
+                                    ].map((entry, index) => (
+                                      <Cell key={`cell-${index}`} fill={entry.color} />
+                                    ))}
+                                  </Pie>
+                                  <Tooltip formatter={(value) => `₹${value.toLocaleString()}`} />
+                                  <Legend />
+                                </PieChart>
+                              </ResponsiveContainer>
+                            </div>
+
+                            {/* Payment Status Pie Chart */}
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                              <h3 className="text-lg font-semibold text-white mb-4">📊 Payment Status</h3>
+                              <ResponsiveContainer width="100%" height={300}>
+                                <PieChart>
+                                  <Pie
+                                    data={[
+                                      { name: 'Fully Paid', value: analyticsData.summary?.total_fully_paid_transactions || 0, color: '#10b981' },
+                                      { name: 'Partially Paid', value: analyticsData.summary?.total_partially_paid_transactions || 0, color: '#f59e0b' },
+                                      { name: 'Unpaid', value: analyticsData.summary?.total_unpaid_transactions || 0, color: '#ef4444' }
+                                    ]}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={60}
+                                    outerRadius={100}
+                                    paddingAngle={2}
+                                    dataKey="value"
+                                    label={({ name, value }) => `${name}: ${value}`}
+                                    labelLine={false}
+                                  >
+                                    <Cell fill="#10b981" />
+                                    <Cell fill="#f59e0b" />
+                                    <Cell fill="#ef4444" />
+                                  </Pie>
+                                  <Tooltip />
+                                  <Legend />
+                                </PieChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+
+                          {/* Driver Revenue Bar Chart */}
+                          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                            <h3 className="text-lg font-semibold text-white mb-4">📈 Revenue by Driver</h3>
+                            <ResponsiveContainer width="100%" height={400}>
+                              <BarChart data={analyticsData.drivers.slice(0, 10).map(d => ({
+                                name: d.driver_name?.split(' ')[0] || `Driver ${d.driver_id}`,
+                                revenue: d.total_revenue_generated || 0,
+                                commission: d.commission_earned || 0,
+                                paid: d.commission_paid || 0,
+                                pending: d.commission_pending || 0
+                              }))}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                                <XAxis dataKey="name" stroke="#9ca3af" fontSize={12} />
+                                <YAxis stroke="#9ca3af" fontSize={12} tickFormatter={(v) => `₹${(v/1000).toFixed(0)}k`} />
+                                <Tooltip 
+                                  formatter={(value) => `₹${value.toLocaleString()}`}
+                                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #374151', borderRadius: '8px' }}
+                                />
+                                <Legend />
+                                <Bar dataKey="revenue" name="Total Revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="commission" name="Commission Earned" fill="#10b981" radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          {/* Commission Paid vs Pending Bar Chart */}
+                          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                            <h3 className="text-lg font-semibold text-white mb-4">💵 Commission: Paid vs Pending</h3>
+                            <ResponsiveContainer width="100%" height={350}>
+                              <BarChart data={analyticsData.drivers.slice(0, 10).map(d => ({
+                                name: d.driver_name?.split(' ')[0] || `Driver ${d.driver_id}`,
+                                paid: d.commission_paid || 0,
+                                pending: d.commission_pending || 0
+                              }))}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                                <XAxis dataKey="name" stroke="#9ca3af" fontSize={12} />
+                                <YAxis stroke="#9ca3af" fontSize={12} tickFormatter={(v) => `₹${(v/1000).toFixed(0)}k`} />
+                                <Tooltip 
+                                  formatter={(value) => `₹${value.toLocaleString()}`}
+                                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #374151', borderRadius: '8px' }}
+                                />
+                                <Legend />
+                                <Bar dataKey="paid" name="Commission Paid" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="pending" name="Commission Pending" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          {/* Driver Details with Hierarchical Drill-Down */}
+                          <div className="rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden">
+                            <div className="p-4 border-b border-slate-700">
+                              <h3 className="text-lg font-semibold text-white">🚗 Driver Details - Hierarchical Drill-Down</h3>
+                              <p className="text-xs text-slate-400 mt-1">Click on any driver to view transaction details and payment history</p>
+                            </div>
+                            <div className="space-y-2 p-4">
+                              {analyticsData.drivers.map((driver) => (
+                                <div key={driver.driver_id} className="border border-slate-700 rounded-lg overflow-hidden">
+                                  {/* Level 1: Driver Summary */}
+                                  <div 
+                                    onClick={() => toggleDriverExpand(driver.driver_id)}
+                                    className="p-4 bg-slate-800/50 hover:bg-slate-700/50 cursor-pointer transition"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-3">
+                                        <div className="text-2xl">
+                                          {expandedDrivers[driver.driver_id] ? '▼' : '▶'}
+                                        </div>
+                                        <div>
+                                          <p className="font-semibold text-white text-lg">{driver.driver_name}</p>
+                                          <p className="text-xs text-slate-400">ID: {driver.driver_id} • Joined: {driver.driver_created_at ? new Date(driver.driver_created_at).toLocaleDateString() : 'N/A'}</p>
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-4 gap-4 text-center">
+                                        <div>
+                                          <p className="text-xs text-slate-400">Revenue</p>
+                                          <p className="text-emerald-300 font-semibold">₹{(driver.total_revenue_generated || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-slate-400">Commission</p>
+                                          <p className="text-purple-300 font-semibold">₹{(driver.commission_earned || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-slate-400">Trips</p>
+                                          <p className="text-white font-semibold">{driver.total_bookings || 0}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs text-slate-400">Status</p>
+                                          <div className="flex gap-1 justify-center">
+                                            <span className="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-300">{driver.fully_paid_transactions || 0}</span>
+                                            <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-300">{driver.partially_paid_transactions || 0}</span>
+                                            <span className="px-2 py-0.5 rounded text-xs bg-red-500/20 text-red-300">{driver.unpaid_transactions || 0}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Level 2: Expanded Driver Details */}
+                                  {expandedDrivers[driver.driver_id] && (
+                                    <div className="p-4 bg-slate-900/30 border-t border-slate-700">
+                                      {/* Performance Metrics */}
+                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                        <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                                          <p className="text-xs text-slate-400">Commission Earned</p>
+                                          <p className="text-green-300 font-bold text-lg">₹{(driver.commission_earned || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                                          <p className="text-xs text-slate-400">Commission Paid</p>
+                                          <p className="text-emerald-300 font-bold text-lg">₹{(driver.commission_paid || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div className="p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                                          <p className="text-xs text-slate-400">Commission Pending</p>
+                                          <p className="text-orange-300 font-bold text-lg">₹{(driver.commission_pending || 0).toLocaleString()}</p>
+                                        </div>
+                                        <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                                          <p className="text-xs text-slate-400">Completed Trips</p>
+                                          <p className="text-blue-300 font-bold text-lg">{driver.completed_bookings || 0}</p>
+                                        </div>
+                                      </div>
+
+                                      {/* Level 3: Transaction List */}
+                                      {driver.transactions && driver.transactions.length > 0 && (
+                                        <div className="mt-4">
+                                          <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                                            <span>📋</span> Transaction History ({driver.transactions.length} trips)
+                                          </h4>
+                                          <div className="space-y-2">
+                                            {driver.transactions.map((txn, idx) => (
+                                              <div key={idx} className="border border-slate-600 rounded-lg overflow-hidden">
+                                                <div 
+                                                  onClick={() => toggleTransactionExpand(`${driver.driver_id}-${idx}`)}
+                                                  className="p-3 bg-slate-800/30 hover:bg-slate-700/30 cursor-pointer transition"
+                                                >
+                                                  <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="text-sm">{expandedTransactions[`${driver.driver_id}-${idx}`] ? '▼' : '▶'}</span>
+                                                      <div>
+                                                        <p className="text-sm font-medium text-white">{txn.transaction_number || `TXN-${idx + 1}`}</p>
+                                                        <p className="text-xs text-slate-400">{txn.created_at ? new Date(txn.created_at).toLocaleString() : 'N/A'}</p>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-4">
+                                                      <div className="text-right">
+                                                        <p className="text-xs text-slate-400">Amount</p>
+                                                        <p className="text-white font-semibold">₹{(txn.total_amount || 0).toLocaleString()}</p>
+                                                      </div>
+                                                      <div className="text-right">
+                                                        <p className="text-xs text-slate-400">Commission</p>
+                                                        <p className="text-purple-300 font-semibold">₹{(txn.driver_share || 0).toLocaleString()}</p>
+                                                      </div>
+                                                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                                        txn.status === 'COMPLETED' ? 'bg-green-500/20 text-green-300' :
+                                                        txn.status === 'CANCELLED' ? 'bg-red-500/20 text-red-300' :
+                                                        'bg-yellow-500/20 text-yellow-300'
+                                                      }`}>
+                                                        {txn.status || 'PENDING'}
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                </div>
+
+                                                {/* Level 4: Transaction Details & Payment History */}
+                                                {expandedTransactions[`${driver.driver_id}-${idx}`] && (
+                                                  <div className="p-3 bg-slate-900/50 border-t border-slate-600 space-y-3">
+                                                    {/* Route Information */}
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                      <div>
+                                                        <p className="text-xs text-slate-400 mb-1">📍 Pickup</p>
+                                                        <p className="text-sm text-white">{txn.pickup_location || 'N/A'}</p>
+                                                      </div>
+                                                      <div>
+                                                        <p className="text-xs text-slate-400 mb-1">🎯 Destination</p>
+                                                        <p className="text-sm text-white">{txn.destination_location || 'N/A'}</p>
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Commission Breakdown */}
+                                                    <div className="bg-slate-800/50 rounded-lg p-3">
+                                                      <p className="text-xs font-semibold text-slate-300 mb-2">💰 Commission Breakdown</p>
+                                                      <div className="grid grid-cols-4 gap-2 text-xs">
+                                                        <div>
+                                                          <p className="text-slate-400">Driver (79%)</p>
+                                                          <p className="text-green-300 font-semibold">₹{(txn.driver_share || 0).toLocaleString()}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-slate-400">Dispatcher (18%)</p>
+                                                          <p className="text-purple-300 font-semibold">₹{(txn.dispatcher_share || 0).toLocaleString()}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-slate-400">Admin (2%)</p>
+                                                          <p className="text-orange-300 font-semibold">₹{(txn.admin_share || 0).toLocaleString()}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-slate-400">Super Admin (1%)</p>
+                                                          <p className="text-red-300 font-semibold">₹{(txn.super_admin_share || 0).toLocaleString()}</p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Payment Information */}
+                                                    <div className="bg-slate-800/50 rounded-lg p-3">
+                                                      <p className="text-xs font-semibold text-slate-300 mb-2">💳 Payment Details</p>
+                                                      <div className="grid grid-cols-3 gap-2 text-xs">
+                                                        <div>
+                                                          <p className="text-slate-400">Total Amount</p>
+                                                          <p className="text-white font-semibold">₹{(txn.total_amount || 0).toLocaleString()}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-slate-400">Paid Amount</p>
+                                                          <p className="text-green-300 font-semibold">₹{(txn.paid_amount || 0).toLocaleString()}</p>
+                                                        </div>
+                                                        <div>
+                                                          <p className="text-slate-400">Payment Method</p>
+                                                          <p className="text-blue-300 font-semibold">{txn.payment_method || 'N/A'}</p>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {(!driver.transactions || driver.transactions.length === 0) && (
+                                        <div className="text-center py-4 text-slate-400 text-sm">
+                                          No transactions found for this driver
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Generic data display for other report types */}
+                      {selectedAnalyticsReport !== 'driver' && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                          <pre className="text-sm text-slate-300 overflow-auto max-h-[600px]">
+                            {JSON.stringify(analyticsData, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* No Data State - Only show for driver analytics when drivers array is empty and no error */}
+                  {!analyticsLoading && analyticsData && selectedAnalyticsReport === 'driver' && analyticsData.drivers && analyticsData.drivers.length === 0 && !analyticsData.error && (
+                    <div className="text-center py-12 rounded-xl border border-amber-500/30 bg-amber-500/10 p-8">
+                      <div className="text-6xl mb-4">📊</div>
+                      <h3 className="text-xl font-semibold text-amber-300 mb-2">No Data Available</h3>
+                      <p className="text-slate-400 mb-4">
+                        {analyticsData.message || 'No records found for the selected time period.'}
+                      </p>
+                      <div className="text-sm text-slate-500 space-y-2">
+                        <p>💡 <strong>Tip:</strong> Try the following:</p>
+                        <ul className="list-disc list-inside text-left max-w-md mx-auto">
+                          <li>Create some bookings first using "New Booking"</li>
+                          <li>Try selecting "All Time" as the time period</li>
+                          <li>Check if you have the necessary permissions</li>
+                          <li>Verify that transactions exist in the system</li>
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Error State */}
+                  {!analyticsLoading && analyticsData && analyticsData.error && (
+                    <div className="text-center py-12 rounded-xl border border-red-500/30 bg-red-500/10 p-8">
+                      <div className="text-6xl mb-4">⚠️</div>
+                      <h3 className="text-xl font-semibold text-red-300 mb-2">Error Loading Analytics</h3>
+                      <p className="text-slate-400 mb-4">{analyticsData.message}</p>
+                      <button 
+                        onClick={() => fetchAnalyticsData(selectedAnalyticsReport, analyticsTimeFilter)}
+                        className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                  
+                  {!analyticsLoading && !analyticsData && (
+                    <div className="text-center py-12 rounded-xl border border-red-500/30 bg-red-500/10 p-8">
+                      <div className="text-6xl mb-4">⚠️</div>
+                      <h3 className="text-xl font-semibold text-red-300 mb-2">Error Loading Data</h3>
+                      <p className="text-slate-400">
+                        Failed to fetch analytics data. Please check the console for details.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -4385,141 +4376,6 @@ function App() {
                   )}
                   {selectedTrip.status === 'COMPLETED' && !selectedTrip.is_paid && (
                     <div className="col-span-2 space-y-2">
-                      {/* Saved Payment Methods */}
-                      {savedPaymentMethods.length > 0 && (
-                        <div className="mb-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                          <p className="text-emerald-300 text-xs mb-2 font-semibold">⚡ Quick Pay (Saved Methods)</p>
-                          <div className="space-y-2">
-                            {savedPaymentMethods.map((method) => (
-                              <button
-                                key={method.id}
-                                onClick={async () => {
-                                  if (confirm(`Pay ₹${selectedTrip.total_amount} using ${method.nickname || method.payment_method}?`)) {
-                                    if (method.payment_method === 'UPI' && method.upi_id) {
-                                      const upiUrl = `upi://pay?pa=${method.upi_id}&pn=DGDS&am=${selectedTrip.total_amount}&cu=INR&tn=Payment for ${selectedTrip.transaction_number}`;
-                                      window.location.href = upiUrl;
-                                      setTimeout(async () => {
-                                        if (confirm('Payment completed?')) {
-                                          await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=UPI`);
-                                          const res = await api.get('/api/transactions/');
-                                          setTrips(res.data);
-                                          setSelectedTrip(null);
-                                        }
-                                      }, 3000);
-                                    }
-                                  }
-                                }}
-                                className="w-full py-2 px-3 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 text-sm flex items-center justify-between"
-                              >
-                                <span>💳 {method.nickname || method.payment_method}</span>
-                                {method.is_default && <span className="text-xs bg-emerald-700 px-2 py-0.5 rounded">Default</span>}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <button
-                        onClick={() => {
-                          setShowPaymentModal(true);
-                          setPaymentMethod('');
-                          setPaymentDetails({ upiId: '', mobileNumber: '', qrImage: null });
-                        }}
-                        className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-semibold text-sm flex items-center justify-center gap-2"
-                      >
-                        <CreditCard className="w-4 h-4" />
-                        Pay Now (₹{selectedTrip.total_amount})
-                      </button>
-                      <p className="text-slate-400 text-xs mb-2 hidden">Choose Payment Method:</p>
-                      <div className="grid grid-cols-2 gap-2 hidden">
-                        {/* UPI Payment */}
-                        <button
-                          onClick={async () => {
-                            const upiId = prompt('Enter UPI ID (e.g., name@paytm):');
-                            if (upiId) {
-                              const saveForFuture = confirm('Save this UPI ID for future payments?');
-                              const upiUrl = `upi://pay?pa=${upiId}&pn=DGDS&am=${selectedTrip.total_amount}&cu=INR&tn=Payment for ${selectedTrip.transaction_number}`;
-                              window.location.href = upiUrl;
-                              setTimeout(async () => {
-                                if (confirm('Payment completed?')) {
-                                  await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=UPI`);
-                                  
-                                  // Save payment method if requested
-                                  if (saveForFuture && selectedTrip.customer?.id) {
-                                    try {
-                                      await api.post(`/api/customers/${selectedTrip.customer.id}/payment-methods`, {
-                                        payment_method: 'UPI',
-                                        upi_id: upiId,
-                                        nickname: `UPI - ${upiId}`,
-                                        is_default: false
-                                      });
-                                    } catch (err) {
-                                      console.error('Failed to save payment method:', err);
-                                    }
-                                  }
-                                  
-                                  const res = await api.get('/api/transactions/');
-                                  setTrips(res.data);
-                                  setSelectedTrip(null);
-                                }
-                              }, 3000);
-                            }
-                          }}
-                          className="py-2 rounded-xl bg-purple-600 text-white hover:bg-purple-500 text-sm flex items-center justify-center gap-1"
-                        >
-                          💳 UPI
-                        </button>
-                        {/* PhonePe */}
-                        <button
-                          onClick={async () => {
-                            const phonepeUrl = `phonepe://pay?am=${selectedTrip.total_amount}&cu=INR&tn=Trip ${selectedTrip.transaction_number}`;
-                            window.location.href = phonepeUrl;
-                            setTimeout(async () => {
-                              if (confirm('Payment completed via PhonePe?')) {
-                                await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=PHONEPE`);
-                                const res = await api.get('/api/transactions/');
-                                setTrips(res.data);
-                                setSelectedTrip(null);
-                              }
-                            }, 3000);
-                          }}
-                          className="py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-500 text-sm flex items-center justify-center gap-1"
-                        >
-                          📱 PhonePe
-                        </button>
-                        {/* Google Pay */}
-                        <button
-                          onClick={async () => {
-                            const gpayUrl = `tez://upi/pay?pa=merchant@upi&pn=DGDS&am=${selectedTrip.total_amount}&cu=INR&tn=Trip ${selectedTrip.transaction_number}`;
-                            window.location.href = gpayUrl;
-                            setTimeout(async () => {
-                              if (confirm('Payment completed via Google Pay?')) {
-                                await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=GOOGLEPAY`);
-                                const res = await api.get('/api/transactions/');
-                                setTrips(res.data);
-                                setSelectedTrip(null);
-                              }
-                            }, 3000);
-                          }}
-                          className="py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-500 text-sm flex items-center justify-center gap-1"
-                        >
-                          🔵 Google Pay
-                        </button>
-                        {/* QR Code */}
-                        <button
-                          onClick={async () => {
-                            alert(`Show QR Code for ₹${selectedTrip.total_amount}\n\nScan to pay for trip ${selectedTrip.transaction_number}`);
-                            if (confirm('Payment completed via QR Code?')) {
-                              await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=QR_CODE`);
-                              const res = await api.get('/api/transactions/');
-                              setTrips(res.data);
-                              setSelectedTrip(null);
-                            }
-                          }}
-                          className="py-2 rounded-xl bg-teal-600 text-white hover:bg-teal-500 text-sm flex items-center justify-center gap-1"
-                        >
-                          📷 QR Code
-                        </button>
-                      </div>
                       <button
                         disabled={paymentLoading}
                         onClick={async () => {
@@ -4644,16 +4500,14 @@ function App() {
                       </button>
                       <button
                         onClick={async () => {
-                          if (confirm(`Record cash payment of ₹${selectedTrip.total_amount}?`)) {
-                            await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=CASH`);
-                            const res = await api.get('/api/transactions/');
-                            setTrips(res.data);
-                            setSelectedTrip(null);
-                          }
+                          await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=CASH`);
+                          const res = await api.get('/api/transactions/');
+                          setTrips(res.data);
+                          setSelectedTrip(null);
                         }}
                         className="w-full py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-500 text-sm"
                       >
-                        💰 Cash Payment
+                        💰 Record Cash Payment (₹{selectedTrip.total_amount})
                       </button>
                     </div>
                   )}
@@ -4665,106 +4519,22 @@ function App() {
                 </div>
               </div>
 
-              {/* Commission Breakdown */}
-              <div className="mb-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800">
-                <p className="text-slate-400 text-sm mb-3 font-semibold">💰 Commission Breakdown</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700">
-                    <p className="text-xs text-slate-400">Total Amount</p>
-                    <p className="text-lg font-bold text-white">₹{selectedTrip.total_amount}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700">
-                    <p className="text-xs text-slate-400">Payment Status</p>
-                    <p className={`text-sm font-bold ${selectedTrip.is_paid ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      {selectedTrip.is_paid ? '✓ PAID' : '⏳ UNPAID'}
-                    </p>
-                  </div>
+              <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <p className="text-xs text-slate-400">Total</p>
+                  <p className="text-lg font-bold text-white">₹{selectedTrip.total_amount}</p>
                 </div>
-                <div className="mt-3 space-y-2">
-                  <div className="flex justify-between items-center p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
-                    <span className="text-sm text-purple-300">🚗 Driver Share (75%)</span>
-                    <span className="text-sm font-bold text-purple-300">₹{selectedTrip.driver_share}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                    <span className="text-sm text-blue-300">⚙️ Admin Share (20%)</span>
-                    <span className="text-sm font-bold text-blue-300">₹{selectedTrip.admin_share}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                    <span className="text-sm text-amber-300">📞 Dispatcher Share (2%)</span>
-                    <span className="text-sm font-bold text-amber-300">₹{selectedTrip.dispatcher_share}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-2 rounded-lg bg-red-500/10 border border-red-500/20">
-                    <span className="text-sm text-red-300">👑 Super Admin Share (3%)</span>
-                    <span className="text-sm font-bold text-red-300">₹{selectedTrip.super_admin_share || '0.00'}</span>
-                  </div>
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <p className="text-xs text-slate-400">Driver (75%)</p>
+                  <p className="text-lg font-bold text-purple-300">₹{selectedTrip.driver_share}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <p className="text-xs text-slate-400">Status</p>
+                  <p className={`text-sm font-bold ${selectedTrip.is_paid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {selectedTrip.is_paid ? 'PAID' : 'UNPAID'}
+                  </p>
                 </div>
               </div>
-
-              {/* Payment History */}
-              {selectedTrip.payments && selectedTrip.payments.length > 0 && (
-                <div className="mb-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800">
-                  <p className="text-slate-400 text-sm mb-3 font-semibold">💳 Payment History</p>
-                  <div className="space-y-2">
-                    {selectedTrip.payments.map((payment, idx) => (
-                      <div key={idx} className="p-3 rounded-lg bg-slate-900/60 border border-slate-700">
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              payment.status === 'SUCCESS' ? 'bg-emerald-500/20 text-emerald-300' :
-                              payment.status === 'FAILED' ? 'bg-red-500/20 text-red-300' :
-                              payment.status === 'PENDING' ? 'bg-amber-500/20 text-amber-300' :
-                              'bg-slate-500/20 text-slate-300'
-                            }`}>
-                              {payment.status === 'SUCCESS' ? '✓ SUCCESS' :
-                               payment.status === 'FAILED' ? '✗ FAILED' :
-                               payment.status === 'PENDING' ? '⏳ PENDING' :
-                               payment.status}
-                            </span>
-                            <span className="text-xs text-slate-400">{payment.payment_method}</span>
-                          </div>
-                          <span className="text-sm font-bold text-white">₹{payment.amount}</span>
-                        </div>
-                        {payment.razorpay_payment_id && (
-                          <p className="text-xs text-slate-500">ID: {payment.razorpay_payment_id}</p>
-                        )}
-                        {payment.notes && (
-                          <p className="text-xs text-slate-400 mt-1">{payment.notes}</p>
-                        )}
-                        <p className="text-xs text-slate-500 mt-1">
-                          {new Date(payment.created_at).toLocaleString('en-IN', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short'
-                          })}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Event Timeline */}
-              {selectedTrip.events && selectedTrip.events.length > 0 && (
-                <div className="mb-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800">
-                  <p className="text-slate-400 text-sm mb-3 font-semibold">📋 Event Timeline</p>
-                  <div className="space-y-2">
-                    {selectedTrip.events.map((event, idx) => (
-                      <div key={idx} className="flex items-start gap-3 p-2 rounded-lg bg-slate-900/60 border border-slate-700">
-                        <div className="flex-shrink-0 w-2 h-2 mt-1.5 rounded-full bg-blue-400"></div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-white font-medium">{event.event.replace(/_/g, ' ')}</p>
-                          <p className="text-xs text-slate-400">{event.description}</p>
-                          <p className="text-xs text-slate-500 mt-1">
-                            {new Date(event.timestamp).toLocaleString('en-IN', {
-                              dateStyle: 'medium',
-                              timeStyle: 'short'
-                            })}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <button onClick={() => setSelectedTrip(null)} className="w-full py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700">Close</button>
             </div>
@@ -4960,715 +4730,83 @@ function App() {
             </div>
           </div>
         )}
-      </div>
 
-      {/* Database Reset Modal */}
-      {showResetModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-3xl border border-orange-700 bg-slate-900 p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-orange-400">⚠️ Reset Database</h3>
-              <button onClick={() => setShowResetModal(false)} className="text-slate-400 hover:text-white">
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-
-            <div className="mb-4 rounded-lg bg-orange-500/10 border border-orange-500/20 p-4">
-              <p className="text-sm text-orange-300 font-semibold mb-2">⚠️ Warning: This action cannot be undone!</p>
-              <p className="text-xs text-slate-400">
-                This will delete all existing data including customers, drivers, trips, and payments. 
-                The database will be reseeded with fresh sample data.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <label className="block">
-                <span className="text-sm text-slate-400 mb-2 block">Tenant/Company Name</span>
-                <input
-                  type="text"
-                  value={tenantName}
-                  onChange={(e) => setTenantName(e.target.value)}
-                  placeholder="Enter your company name"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white placeholder-slate-500 focus:border-orange-500 focus:outline-none"
-                />
-                <p className="text-xs text-slate-500 mt-1">This name will be used throughout the application</p>
-              </label>
-
-              <div className="rounded-lg bg-slate-950 border border-slate-700 p-4">
-                <p className="text-xs text-slate-400 mb-2">Default credentials after reset:</p>
-                <div className="space-y-1 text-xs text-slate-300 font-mono">
-                  <p>• Super Admin: superadmin@dgds.com</p>
-                  <p>• Admin: admin@dgds.com</p>
-                  <p>• Dispatcher: priya@dgds.com</p>
-                  <p>• Driver: rajesh@dgds.com</p>
-                  <p>• Customer: john@example.com</p>
-                  <p className="text-orange-300 mt-2">Password for all: password123</p>
+        {/* Database Seeding Progress Modal */}
+        {showSeedingModal && seedingStatus && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-slate-900 rounded-3xl p-6 max-w-md w-full mx-4 border border-slate-700">
+              <h2 className="text-xl font-semibold text-white mb-4">🌱 Database Seeding</h2>
+              
+              {/* Progress Bar */}
+              <div className="mb-4">
+                <div className="flex justify-between text-sm text-slate-400 mb-2">
+                  <span>Progress</span>
+                  <span>{seedingStatus.progress}%</span>
+                </div>
+                <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-500 ease-out"
+                    style={{ width: `${seedingStatus.progress}%` }}
+                  />
                 </div>
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  onClick={async () => {
-                    if (!confirm(`Are you absolutely sure you want to reset the database for "${tenantName}"?\n\nThis will DELETE ALL existing data!`)) {
-                      return;
-                    }
-                    
-                    setResetLoading(true);
-                    try {
-                      const response = await api.post(`/api/admin/reset-database?tenant_name=${encodeURIComponent(tenantName)}`);
-                      alert(`✅ Database reset successfully!\n\nTenant: ${response.data.tenant_name}\n\nYou will be logged out. Please login again with the default credentials.`);
-                      
-                      // Logout user
-                      localStorage.removeItem('auth_token');
-                      localStorage.removeItem('auth_user');
-                      setIsAuthenticated(false);
-                      setCurrentUser(null);
-                      setShowResetModal(false);
-                      setShowLogin(true);
-                    } catch (error) {
-                      alert(`❌ Failed to reset database:\n${error.response?.data?.detail || error.message}`);
-                    } finally {
-                      setResetLoading(false);
-                    }
-                  }}
-                  disabled={resetLoading || !tenantName.trim()}
-                  className="flex-1 py-3 rounded-lg bg-orange-600 text-white font-semibold hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {resetLoading ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Resetting...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-4 w-4" />
-                      Reset Database
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => setShowResetModal(false)}
-                  disabled={resetLoading}
-                  className="flex-1 py-3 rounded-lg bg-slate-700 text-slate-300 font-semibold hover:bg-slate-600 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
+              {/* Status Message */}
+              <div className="bg-slate-800/50 rounded-xl p-4 mb-4">
+                <p className="text-sm text-slate-300">{seedingStatus.message}</p>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Unified Payment Modal */}
-      {showPaymentModal && selectedTrip && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-white">Pay ₹{selectedTrip.total_amount}</h3>
-              <button onClick={() => setShowPaymentModal(false)} className="text-slate-400 hover:text-white">
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-
-            {/* Payment Method Selection */}
-            <div className="mb-4 space-y-2">
-              <p className="text-sm text-slate-400">Select Payment Method:</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={async () => {
-                    setPaymentMethod('QR_CODE');
-                    try {
-                      const response = await api.get(`/api/payments/generate-qr/${selectedTrip.id}`);
-                      setPaymentDetails({ ...paymentDetails, qrCodeData: response.data });
-                    } catch (error) {
-                      console.error('Error generating QR code:', error);
-                    }
-                  }}
-                  className={`py-2 px-3 rounded-lg text-sm font-medium transition ${
-                    paymentMethod === 'QR_CODE' ? 'bg-teal-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  📷 Scan QR
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('UPI')}
-                  className={`py-2 px-3 rounded-lg text-sm font-medium transition ${
-                    paymentMethod === 'UPI' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  💳 UPI ID
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('PHONEPE')}
-                  className={`py-2 px-3 rounded-lg text-sm font-medium transition ${
-                    paymentMethod === 'PHONEPE' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  📱 PhonePe
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('GOOGLEPAY')}
-                  className={`py-2 px-3 rounded-lg text-sm font-medium transition ${
-                    paymentMethod === 'GOOGLEPAY' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  🔵 Google Pay
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('RAZORPAY')}
-                  className={`py-2 px-3 rounded-lg text-sm font-medium transition ${
-                    paymentMethod === 'RAZORPAY' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  💰 Razorpay
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('CASH')}
-                  className={`py-2 px-3 rounded-lg text-sm font-medium transition ${
-                    paymentMethod === 'CASH' ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  💵 Cash
-                </button>
-              </div>
-            </div>
-
-            {/* Payment Details Form */}
-            {paymentMethod === 'UPI' && (
-              <div className="space-y-3">
-                <label className="block">
-                  <span className="text-sm text-slate-400">Enter UPI ID</span>
-                  <input
-                    type="text"
-                    placeholder="username@paytm"
-                    value={paymentDetails.upiId}
-                    onChange={(e) => setPaymentDetails({ ...paymentDetails, upiId: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-white placeholder-slate-500"
-                  />
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="saveUpi"
-                    className="rounded border-slate-700 bg-slate-950"
-                  />
-                  <label htmlFor="saveUpi" className="text-sm text-slate-400">Save for future payments</label>
-                </div>
-                <button
-                  onClick={async () => {
-                    if (!paymentDetails.upiId) {
-                      alert('Please enter UPI ID');
-                      return;
-                    }
-                    const upiUrl = `upi://pay?pa=${paymentDetails.upiId}&pn=DGDS&am=${selectedTrip.total_amount}&cu=INR&tn=Payment for ${selectedTrip.transaction_number}`;
-                    window.location.href = upiUrl;
-                    setTimeout(async () => {
-                      if (confirm('Payment completed?')) {
-                        await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=UPI`);
-                        if (document.getElementById('saveUpi').checked && selectedTrip.customer?.id) {
-                          await api.post(`/api/customers/${selectedTrip.customer.id}/payment-methods`, {
-                            payment_method: 'UPI',
-                            upi_id: paymentDetails.upiId,
-                            nickname: `UPI - ${paymentDetails.upiId}`,
-                            is_default: false
-                          });
-                        }
-                        const res = await api.get('/api/transactions/');
-                        setTrips(res.data);
-                        setSelectedTrip(null);
-                        setShowPaymentModal(false);
-                      }
-                    }, 3000);
-                  }}
-                  className="w-full py-3 rounded-lg bg-purple-600 text-white font-semibold hover:bg-purple-500"
-                >
-                  Pay with UPI
-                </button>
-              </div>
-            )}
-
-            {(paymentMethod === 'PHONEPE' || paymentMethod === 'GOOGLEPAY') && (
-              <div className="space-y-3">
-                <label className="block">
-                  <span className="text-sm text-slate-400">Enter Mobile Number</span>
-                  <input
-                    type="tel"
-                    placeholder="10-digit mobile number"
-                    value={paymentDetails.mobileNumber}
-                    onChange={(e) => setPaymentDetails({ ...paymentDetails, mobileNumber: e.target.value })}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-white placeholder-slate-500"
-                  />
-                </label>
-                <button
-                  onClick={async () => {
-                    if (!paymentDetails.mobileNumber) {
-                      alert('Please enter mobile number');
-                      return;
-                    }
-                    const appUrl = paymentMethod === 'PHONEPE' 
-                      ? `phonepe://pay?am=${selectedTrip.total_amount}&cu=INR&tn=Trip ${selectedTrip.transaction_number}&pa=${paymentDetails.mobileNumber}@ybl`
-                      : `tez://upi/pay?pa=${paymentDetails.mobileNumber}@okaxis&pn=DGDS&am=${selectedTrip.total_amount}&cu=INR&tn=Trip ${selectedTrip.transaction_number}`;
-                    window.location.href = appUrl;
-                    setTimeout(async () => {
-                      if (confirm(`Payment completed via ${paymentMethod === 'PHONEPE' ? 'PhonePe' : 'Google Pay'}?`)) {
-                        await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=${paymentMethod}`);
-                        const res = await api.get('/api/transactions/');
-                        setTrips(res.data);
-                        setSelectedTrip(null);
-                        setShowPaymentModal(false);
-                      }
-                    }, 3000);
-                  }}
-                  className={`w-full py-3 rounded-lg font-semibold text-white ${
-                    paymentMethod === 'PHONEPE' ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-blue-600 hover:bg-blue-500'
-                  }`}
-                >
-                  Pay with {paymentMethod === 'PHONEPE' ? 'PhonePe' : 'Google Pay'}
-                </button>
-              </div>
-            )}
-
-            {paymentMethod === 'QR_CODE' && (
-              <div className="space-y-3">
-                {paymentDetails.qrCodeData ? (
-                  <div className="rounded-lg border border-slate-700 bg-slate-950 p-4">
-                    <div className="text-center space-y-3">
-                      <img 
-                        src={paymentDetails.qrCodeData.qr_code} 
-                        alt="Payment QR Code" 
-                        className="mx-auto w-64 h-64 rounded-lg border-4 border-white"
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm text-emerald-400 font-semibold">Scan with any UPI app</p>
-                        <p className="text-xs text-slate-400">Pay to: {paymentDetails.qrCodeData.merchant_name}</p>
-                        <p className="text-xs text-slate-500">{paymentDetails.qrCodeData.merchant_upi_id}</p>
-                        <p className="text-lg text-white font-bold">₹{paymentDetails.qrCodeData.amount}</p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          window.location.href = paymentDetails.qrCodeData.upi_url;
-                          setTimeout(async () => {
-                            if (confirm('Payment completed?')) {
-                              await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=QR_CODE`);
-                              const res = await api.get('/api/transactions/');
-                              setTrips(res.data);
-                              setSelectedTrip(null);
-                              setShowPaymentModal(false);
-                            }
-                          }, 3000);
-                        }}
-                        className="w-full py-3 rounded-lg bg-teal-600 text-white font-semibold hover:bg-teal-500"
-                      >
-                        Open UPI App
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <RefreshCw className="h-8 w-8 animate-spin mx-auto text-teal-400 mb-2" />
-                    <p className="text-sm text-slate-400">Generating QR Code...</p>
-                  </div>
+              {/* Status Indicator */}
+              <div className="flex items-center gap-2 mb-4">
+                {seedingStatus.is_running && (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-500"></div>
+                    <span className="text-sm text-slate-400">Seeding in progress...</span>
+                  </>
                 )}
-                <button
-                  onClick={async () => {
-                    if (confirm('I have completed the payment via QR Code')) {
-                      await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=QR_CODE`);
-                      const res = await api.get('/api/transactions/');
-                      setTrips(res.data);
-                      setSelectedTrip(null);
-                      setShowPaymentModal(false);
-                    }
-                  }}
-                  className="w-full py-2 rounded-lg bg-slate-700 text-slate-300 font-medium hover:bg-slate-600"
-                >
-                  I've Paid - Confirm
-                </button>
+                {seedingStatus.completed && (
+                  <>
+                    <div className="h-5 w-5 rounded-full bg-green-500 flex items-center justify-center">
+                      <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <span className="text-sm text-green-400">Seeding completed!</span>
+                  </>
+                )}
+                {seedingStatus.error && (
+                  <>
+                    <div className="h-5 w-5 rounded-full bg-red-500 flex items-center justify-center">
+                      <span className="text-white text-xs">!</span>
+                    </div>
+                    <span className="text-sm text-red-400">Error occurred</span>
+                  </>
+                )}
               </div>
-            )}
 
-            {paymentMethod === 'RAZORPAY' && (
-              <div className="space-y-3">
-                <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-4">
-                  <p className="text-sm text-blue-300 mb-2">💰 Razorpay Payment Gateway</p>
-                  <p className="text-xs text-slate-400">Secure payment via Razorpay. Supports cards, UPI, wallets, and net banking.</p>
+              {/* Error Details */}
+              {seedingStatus.error && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4">
+                  <p className="text-sm text-red-300">{seedingStatus.error}</p>
                 </div>
-                <button
-                  onClick={async () => {
-                    alert('Razorpay integration will open payment gateway here');
-                    // Razorpay integration code would go here
-                  }}
-                  className="w-full py-3 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-400"
-                >
-                  Pay with Razorpay
-                </button>
-              </div>
-            )}
+              )}
 
-            {paymentMethod === 'CASH' && (
-              <div className="space-y-3">
-                <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-4">
-                  <p className="text-sm text-green-300 mb-2">💵 Cash Payment</p>
-                  <p className="text-xs text-slate-400">Record cash payment received from customer</p>
-                </div>
-                <button
-                  onClick={async () => {
-                    if (confirm(`Record cash payment of ₹${selectedTrip.total_amount}?`)) {
-                      await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=CASH`);
-                      const res = await api.get('/api/transactions/');
-                      setTrips(res.data);
-                      setSelectedTrip(null);
-                      setShowPaymentModal(false);
-                      alert('Cash payment recorded successfully!');
-                    }
-                  }}
-                  className="w-full py-3 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-500"
-                >
-                  Record Cash Payment
-                </button>
-              </div>
-            )}
-
-            {!paymentMethod && (
-              <p className="text-center text-sm text-slate-500 py-8">Select a payment method to continue</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Tenant Creation Modal */}
-      {showTenantModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full">
-            <h3 className="text-xl font-semibold text-white mb-4">Create New Tenant</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-2">Tenant Name *</label>
-                <input
-                  type="text"
-                  value={tenantForm.name}
-                  onChange={(e) => setTenantForm({ ...tenantForm, name: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                  placeholder="e.g., Acme Transport"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-2">Tenant Code *</label>
-                <input
-                  type="text"
-                  value={tenantForm.code}
-                  onChange={(e) => setTenantForm({ ...tenantForm, code: e.target.value.toUpperCase() })}
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                  placeholder="e.g., ACME"
-                  maxLength={20}
-                  required
-                />
-                <p className="text-xs text-slate-500 mt-1">Unique identifier for the tenant</p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-2">Description</label>
-                <textarea
-                  value={tenantForm.description}
-                  onChange={(e) => setTenantForm({ ...tenantForm, description: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                  placeholder="Optional description of the tenant"
-                  rows={3}
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
+              {/* Close Button */}
               <button
-                onClick={() => {
-                  setShowTenantModal(false);
-                  setTenantForm({ name: '', code: '', description: '' });
-                }}
-                className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    const response = await api.post('/api/super-admin/tenants', tenantForm);
-                    setTenants([...tenants, response.data]);
-                    setShowTenantModal(false);
-                    setTenantForm({ name: '', code: '', description: '' });
-                    alert(`Tenant "${response.data.name}" created successfully!`);
-                  } catch (error) {
-                    alert(`Error: ${error.response?.data?.detail || 'Failed to create tenant'}`);
-                  }
-                }}
-                className="flex-1 py-3 rounded-xl bg-purple-500 text-white hover:bg-purple-600 transition"
-              >
-                Create Tenant
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tenant Picker Modal for Super Admin */}
-      {showTenantPicker && currentUser?.role === 'SUPER_ADMIN' && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white">Switch Tenant Context</h3>
-              <button
-                onClick={() => setShowTenantPicker(false)}
-                className="text-slate-400 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="text-sm text-slate-400 mb-4">
-              Select a tenant to work within. All data operations will be scoped to the selected tenant.
-            </p>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {/* Option to see all data */}
-              <button
-                onClick={() => {
-                  setActiveTenant(null);
-                  localStorage.removeItem('active_tenant');
-                  localStorage.removeItem('active_tenant_id');
-                  setShowTenantPicker(false);
-                  window.location.reload();
-                }}
-                className={`w-full text-left px-4 py-3 rounded-xl border transition ${
-                  !activeTenant
-                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-200'
-                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                onClick={closeSeedingModal}
+                disabled={seedingStatus.is_running}
+                className={`w-full py-2 rounded-xl text-sm font-medium transition ${
+                  seedingStatus.is_running
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                <p className="font-semibold">All Tenants (Global View)</p>
-                <p className="text-xs text-slate-500">See data across all tenants</p>
-              </button>
-              {tenants.map((tenant) => (
-                <button
-                  key={tenant.id}
-                  onClick={() => {
-                    setActiveTenant(tenant);
-                    localStorage.setItem('active_tenant', JSON.stringify(tenant));
-                    localStorage.setItem('active_tenant_id', String(tenant.id));
-                    setShowTenantPicker(false);
-                    window.location.reload();
-                  }}
-                  className={`w-full text-left px-4 py-3 rounded-xl border transition ${
-                    activeTenant?.id === tenant.id
-                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  <p className="font-semibold">{tenant.name}</p>
-                  <p className="text-xs text-slate-500">Code: {tenant.code} · ID: {tenant.id}</p>
-                </button>
-              ))}
-            </div>
-            {tenants.length === 0 && (
-              <p className="text-center text-slate-500 py-4">No tenants found. Create one first.</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Tenant Reset Confirmation Modal */}
-      {showTenantResetModal && selectedTenant && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full">
-            <div className="text-center">
-              <AlertTriangle className="h-16 w-16 mx-auto text-red-400 mb-4" />
-              <h3 className="text-xl font-semibold text-white mb-2">Reset Tenant Data</h3>
-              <p className="text-slate-400 mb-6">
-                Are you sure you want to reset ALL data for tenant <strong>{selectedTenant.name}</strong>?
-              </p>
-              <p className="text-sm text-red-400 mb-6">
-                This action cannot be undone. All customers, drivers, dispatchers, and transactions will be permanently deleted.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setShowTenantResetModal(false);
-                    setSelectedTenant(null);
-                  }}
-                  className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      await api.post(`/api/super-admin/tenants/${selectedTenant.id}/reset`);
-                      setTenants(tenants.map(t => 
-                        t.id === selectedTenant.id 
-                          ? { ...t, customer_count: 0, driver_count: 0, dispatcher_count: 0, transaction_count: 0 }
-                          : t
-                      ));
-                      setShowTenantResetModal(false);
-                      setSelectedTenant(null);
-                      alert(`All data for "${selectedTenant.name}" has been reset successfully!`);
-                    } catch (error) {
-                      alert(`Error: ${error.response?.data?.detail || 'Failed to reset tenant data'}`);
-                    }
-                  }}
-                  className="flex-1 py-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition"
-                >
-                  Reset All Data
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Payment Screenshot Upload Modal */}
-      {showPaymentModal && selectedTripForPayment && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white flex items-center gap-2">
-                <Upload className="h-5 w-5 text-emerald-400" />
-                Upload Payment Screenshot
-              </h3>
-              <button
-                onClick={() => {
-                  setShowPaymentModal(false);
-                  setSelectedTripForPayment(null);
-                }}
-                className="text-slate-400 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="text-sm text-slate-400 mb-4">
-              Attach a payment screenshot for trip #{selectedTripForPayment.id}
-            </p>
-            <div className="space-y-4">
-              <div className="border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:border-emerald-500 transition-colors">
-                <input
-                  type="file"
-                  id="payment-screenshot"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files[0];
-                    if (file) {
-                      handlePaymentScreenshotUpload(selectedTripForPayment.id, file);
-                      setShowPaymentModal(false);
-                      setSelectedTripForPayment(null);
-                    }
-                  }}
-                />
-                <label
-                  htmlFor="payment-screenshot"
-                  className="cursor-pointer flex flex-col items-center gap-2"
-                >
-                  <Camera className="h-12 w-12 text-slate-500" />
-                  <span className="text-slate-300 font-medium">Click to upload screenshot</span>
-                  <span className="text-xs text-slate-500">PNG, JPG, GIF up to 10MB</span>
-                </label>
-              </div>
-              {paymentScreenshots[selectedTripForPayment.id] && (
-                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
-                  <p className="text-sm text-emerald-300 font-medium flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Screenshot uploaded successfully
-                  </p>
-                  <p className="text-xs text-emerald-200 mt-1">
-                    Uploaded: {new Date(paymentScreenshots[selectedTripForPayment.id].uploaded_at).toLocaleString()}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowPaymentModal(false);
-                  setSelectedTripForPayment(null);
-                }}
-                className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
-              >
-                Cancel
+                {seedingStatus.is_running ? 'Please wait...' : 'Close'}
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Error Chat Modal */}
-      {showErrorChat && selectedTripForChat && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 text-amber-400" />
-                Error Chat - Trip #{selectedTripForChat.id}
-              </h3>
-              <button
-                onClick={() => {
-                  setShowErrorChat(false);
-                  setSelectedTripForChat(null);
-                  setChatMessage('');
-                }}
-                className="text-slate-400 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            
-            {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto mb-4 space-y-3 min-h-[200px] max-h-[400px]">
-              {errorChatMessages[selectedTripForChat.id]?.length > 0 ? (
-                errorChatMessages[selectedTripForChat.id].map((msg, index) => (
-                  <div key={index} className={`flex ${msg.sender_type === 'CUSTOMER' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${
-                      msg.sender_type === 'CUSTOMER' 
-                        ? 'bg-purple-500 text-white' 
-                        : 'bg-slate-700 text-slate-200'
-                    }`}>
-                      <p className="text-sm">{msg.message}</p>
-                      <p className="text-xs opacity-75 mt-1 flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {new Date(msg.timestamp).toLocaleTimeString()}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center text-slate-500 py-8">
-                  <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>No messages yet. Start the conversation below.</p>
-                </div>
-              )}
-            </div>
-
-            {/* Message Input */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={chatMessage}
-                onChange={(e) => setChatMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && !chatLoading && sendErrorChatMessage(selectedTripForChat.id, chatMessage)}
-                placeholder="Type your message..."
-                className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                disabled={chatLoading}
-              />
-              <button
-                onClick={() => sendErrorChatMessage(selectedTripForChat.id, chatMessage)}
-                disabled={chatLoading || !chatMessage.trim()}
-                className="px-6 py-3 rounded-xl bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
-              >
-                {chatLoading ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="h-4 w-4" />
-                )}
-                Send
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {dialogOverlay}
+        )}
+      </div>
     </div>
   );
 }

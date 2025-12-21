@@ -1,21 +1,16 @@
 from decimal import Decimal
 from typing import Optional
 import os
-import io
-import base64
 from pydantic import BaseModel
 from dotenv import load_dotenv
-import qrcode
 
 # Load environment variables from .env file
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile
+from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 from sqlalchemy import case
-from fastapi import Form
 from database import SessionLocal, engine, Base
 from models import (
     Customer,
@@ -29,8 +24,6 @@ from models import (
     SuperAdmin,
     RideTransaction,
     RideTransactionEvent,
-    PaymentScreenshot,
-    ErrorChatMessage,
     CustomerVehicle,
     PaymentTransaction,
     PaymentMethod,
@@ -38,71 +31,6 @@ from models import (
     PaymentStatus,
     User,
     UserRole,
-    Tenant
-)
-from schemas import (
-    CustomerCreate,
-    CustomerResponse,
-    DriverCreate,
-    DriverResponse,
-    DispatcherCreate,
-    DispatcherResponse,
-    RideTransactionCreate,
-    RideTransactionResponse,
-    CustomerVehicleCreate,
-    CustomerVehicleResponse,
-    PaymentTransactionCreate,
-    PaymentTransactionResponse,
-    UserRegister,
-    UserResponse,
-    UserLogin,
-    Token,
-    PasswordChange,
-    PaymentScreenshotCreate,
-    PaymentScreenshotResponse,
-    ErrorChatMessageCreate,
-    ErrorChatMessageResponse
-)
-from auth import (
-    get_password_hash,
-    verify_password,
-    create_access_token,
-    get_current_user,
-    require_admin,
-    require_dispatcher,
-    require_driver,
-    require_customer,
-    require_super_admin,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-)
-from tenant_filter import get_tenant_filter, apply_tenant_filter, check_tenant_access
-from reports import (
-    generate_analytics_report,
-    generate_customer_report,
-    generate_driver_report,
-    generate_vehicle_report,
-    generate_payment_release_report,
-    generate_transaction_report,
-    ReportFilters,
-    DateRangeFilter
-)
-from export_import import (
-    export_customers_to_csv,
-    export_drivers_to_csv,
-    export_vehicles_to_csv,
-    export_dispatchers_to_csv,
-    export_trips_to_csv,
-    import_customers_from_csv,
-    import_drivers_from_csv,
-    import_vehicles_from_csv
-)
-from notifications import (
-    generate_friendly_booking_id,
-    format_email_booking_notification,
-    format_whatsapp_booking_notification,
-    format_driver_assignment_notification,
-    format_trip_completion_notification,
-    format_cancellation_notification
 )
 from schemas import (
     CustomerCreate,
@@ -111,14 +39,25 @@ from schemas import (
     DriverResponse,
     BookingCreate,
     BookingResponse,
-    SavedPaymentMethodCreate,
-    SavedPaymentMethodResponse,
-    UserResponse,
-    UserRegister,
     UserLogin,
+    UserRegister,
     Token,
-    PasswordChange
+    UserResponse,
+    PasswordChange,
 )
+from auth import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    get_current_user,
+    require_admin,
+    require_dispatcher,
+    require_driver
+)
+from tenant_filter import get_tenant_filter
+
+# Import ACCESS_TOKEN_EXPIRE_MINUTES from auth module
+from auth import ACCESS_TOKEN_EXPIRE_MINUTES
 from datetime import timedelta
 import uvicorn
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -144,16 +83,9 @@ async def add_security_headers(request, call_next):
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
-_cors_origins_env = os.getenv("CORS_ORIGINS") or os.getenv("FRONTEND_ORIGINS")
-_cors_origins = (
-    [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
-    if _cors_origins_env
-    else ["http://localhost:2050", "http://localhost:2070", "http://localhost:3000", "https://dgds-test.vercel.app"]
-)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=["*"],  # In production, specify exact origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -167,22 +99,14 @@ def get_db():
         db.close()
 
 @app.post("/api/customers/", response_model=CustomerResponse)
-async def create_customer(
-    customer: CustomerCreate, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
     existing_customer = (
         db.query(Customer).filter(Customer.email == customer.email).first()
     )
     if existing_customer:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    db_customer = Customer(
-        name=customer.name, 
-        email=customer.email,
-        tenant_id=current_user.tenant_id
-    )
+    db_customer = Customer(name=customer.name, email=customer.email)
 
     db_customer.addresses = [
         CustomerAddress(
@@ -211,16 +135,8 @@ async def create_customer(
     return db_customer
 
 @app.get("/api/customers/", response_model=list[CustomerResponse])
-async def get_customers(
-    skip: int = 0, 
-    limit: int = 100, 
-    include_archived: bool = False, 
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter)
-):
-    from tenant_filter import apply_tenant_filter
+async def get_customers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
     query = db.query(Customer)
-    query = apply_tenant_filter(query, Customer, tenant_id)
     if not include_archived:
         query = query.filter(Customer.is_archived == False)
     customers = query.offset(skip).limit(limit).all()
@@ -289,41 +205,20 @@ async def restore_customer(customer_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/transactions/", response_model=list[BookingResponse])
-async def get_transactions(
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter),
-):
-    query = (
-        db.query(RideTransaction)
-        .options(
-            selectinload(RideTransaction.customer).selectinload(Customer.contact_numbers),
-            selectinload(RideTransaction.driver).selectinload(Driver.contact_numbers),
-            selectinload(RideTransaction.events),
-        )
-        .order_by(RideTransaction.created_at.desc())
-    )
-    query = apply_tenant_filter(query, RideTransaction, tenant_id)
-    return query.offset(skip).limit(limit).all()
+async def get_transactions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    transactions = db.query(RideTransaction).offset(skip).limit(limit).all()
+    return transactions
 
 
 @app.post("/api/drivers/", response_model=DriverResponse)
-async def create_driver(
-    driver: DriverCreate, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def create_driver(driver: DriverCreate, db: Session = Depends(get_db)):
     existing_driver = (
         db.query(Driver).filter(Driver.name == driver.name).first()
     )
     if existing_driver:
         raise HTTPException(status_code=400, detail="Driver name already exists")
 
-    db_driver = Driver(
-        name=driver.name,
-        tenant_id=current_user.tenant_id
-    )
+    db_driver = Driver(name=driver.name)
 
     db_driver.addresses = [
         DriverAddress(
@@ -353,15 +248,8 @@ async def create_driver(
 
 
 @app.get("/api/drivers/", response_model=list[DriverResponse])
-async def get_drivers(
-    skip: int = 0, 
-    limit: int = 100, 
-    include_archived: bool = False, 
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter)
-):
+async def get_drivers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
     query = db.query(Driver)
-    query = apply_tenant_filter(query, Driver, tenant_id)
     if not include_archived:
         query = query.filter(Driver.is_archived == False)
     drivers = query.offset(skip).limit(limit).all()
@@ -426,15 +314,8 @@ async def restore_driver(driver_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/dispatchers/")
-async def get_dispatchers(
-    skip: int = 0, 
-    limit: int = 100, 
-    include_archived: bool = False, 
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter)
-):
+async def get_dispatchers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
     query = db.query(Dispatcher)
-    query = apply_tenant_filter(query, Dispatcher, tenant_id)
     if not include_archived:
         query = query.filter(Dispatcher.is_archived == False)
     dispatchers = query.offset(skip).limit(limit).all()
@@ -478,16 +359,11 @@ class DispatcherUpdate(BaseModel):
 
 
 @app.post("/api/dispatchers/")
-async def create_dispatcher(
-    dispatcher: DispatcherCreate, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def create_dispatcher(dispatcher: DispatcherCreate, db: Session = Depends(get_db)):
     db_dispatcher = Dispatcher(
         name=dispatcher.name,
         contact_number=dispatcher.contact_number,
         email=dispatcher.email,
-        tenant_id=current_user.tenant_id
     )
     db.add(db_dispatcher)
     db.commit()
@@ -642,11 +518,7 @@ def generate_transaction_number(db: Session) -> str:
 
 
 @app.post("/api/bookings/", response_model=BookingResponse)
-async def create_booking(
-    booking: BookingCreate, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     # Ensure dispatcher, customer, driver, vehicle exist (basic validation)
     dispatcher = db.query(Dispatcher).get(booking.dispatcher_id)
     if not dispatcher:
@@ -693,7 +565,6 @@ async def create_booking(
         admin_share=admin_share,
         dispatcher_share=dispatcher_share,
         super_admin_share=super_admin_share,
-        tenant_id=current_user.tenant_id,
     )
 
     transaction.events = [
@@ -714,23 +585,14 @@ async def create_booking(
 
 
 @app.get("/api/bookings/", response_model=list[BookingResponse])
-async def list_bookings(
-    skip: int = 0, 
-    limit: int = 50, 
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter)
-):
-    query = (
-        db.query(RideTransaction)
-        .options(
-            selectinload(RideTransaction.customer).selectinload(Customer.contact_numbers),
-            selectinload(RideTransaction.driver).selectinload(Driver.contact_numbers),
-            selectinload(RideTransaction.events),
-        )
-        .order_by(RideTransaction.created_at.desc())
+async def list_bookings(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    bookings = (
+        db.query(RideTransaction).order_by(RideTransaction.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
     )
-    query = apply_tenant_filter(query, RideTransaction, tenant_id)
-    return query.offset(skip).limit(limit).all()
+    return bookings
 
 
 @app.patch("/api/bookings/{transaction_id}/status")
@@ -813,12 +675,9 @@ async def summary_by_customer(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter)
+    db: Session = Depends(get_db)
 ):
     from sqlalchemy import func as sqlfunc
-    from tenant_filter import apply_tenant_filter
-    
     query = (
         db.query(
             Customer.id,
@@ -830,9 +689,6 @@ async def summary_by_customer(
         )
         .outerjoin(RideTransaction, RideTransaction.customer_id == Customer.id)
     )
-    
-    # Apply tenant filtering
-    query = apply_tenant_filter(query, Customer, tenant_id)
     
     # Apply filters
     if dispatcher_id:
@@ -871,12 +727,9 @@ async def summary_by_driver(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter)
+    db: Session = Depends(get_db)
 ):
     from sqlalchemy import func as sqlfunc
-    from tenant_filter import apply_tenant_filter
-    
     query = (
         db.query(
             Driver.id,
@@ -892,9 +745,6 @@ async def summary_by_driver(
         )
         .outerjoin(RideTransaction, RideTransaction.driver_id == Driver.id)
     )
-    
-    # Apply tenant filtering to both Driver and RideTransaction
-    query = apply_tenant_filter(query, Driver, tenant_id)
     
     # Apply filters
     if dispatcher_id:
@@ -932,12 +782,9 @@ async def summary_by_dispatcher(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db),
-    tenant_id: Optional[int] = Depends(get_tenant_filter)
+    db: Session = Depends(get_db)
 ):
     from sqlalchemy import func as sqlfunc
-    from tenant_filter import apply_tenant_filter
-    
     query = (
         db.query(
             Dispatcher.id,
@@ -953,9 +800,6 @@ async def summary_by_dispatcher(
         )
         .outerjoin(RideTransaction, RideTransaction.dispatcher_id == Dispatcher.id)
     )
-    
-    # Apply tenant filtering
-    query = apply_tenant_filter(query, Dispatcher, tenant_id)
     
     # Apply filters
     if dispatcher_id:
@@ -1604,102 +1448,6 @@ async def get_payment_history(
     ]
 
 
-@app.post("/api/customers/{customer_id}/payment-methods")
-async def save_payment_method(
-    customer_id: int,
-    payment_data: dict,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Save a payment method for quick future payments"""
-    from models import SavedPaymentMethod
-    
-    # Verify customer exists
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    
-    # If setting as default, unset other defaults
-    if payment_data.get("is_default", False):
-        db.query(SavedPaymentMethod).filter(
-            SavedPaymentMethod.customer_id == customer_id,
-            SavedPaymentMethod.is_default == True
-        ).update({"is_default": False})
-    
-    # Create saved payment method
-    saved_method = SavedPaymentMethod(
-        customer_id=customer_id,
-        payment_method=payment_data["payment_method"],
-        upi_id=payment_data.get("upi_id"),
-        nickname=payment_data.get("nickname"),
-        is_default=payment_data.get("is_default", False),
-    )
-    
-    db.add(saved_method)
-    db.commit()
-    db.refresh(saved_method)
-    
-    return {
-        "id": saved_method.id,
-        "payment_method": saved_method.payment_method.value,
-        "upi_id": saved_method.upi_id,
-        "nickname": saved_method.nickname,
-        "is_default": saved_method.is_default,
-        "created_at": saved_method.created_at.isoformat()
-    }
-
-
-@app.get("/api/customers/{customer_id}/payment-methods")
-async def get_saved_payment_methods(
-    customer_id: int,
-    db: Session = Depends(get_db),
-):
-    """Get all saved payment methods for a customer"""
-    from models import SavedPaymentMethod
-    
-    methods = db.query(SavedPaymentMethod).filter(
-        SavedPaymentMethod.customer_id == customer_id,
-        SavedPaymentMethod.is_active == True
-    ).order_by(SavedPaymentMethod.is_default.desc(), SavedPaymentMethod.created_at.desc()).all()
-    
-    return [
-        {
-            "id": m.id,
-            "payment_method": m.payment_method.value,
-            "upi_id": m.upi_id,
-            "card_last4": m.card_last4,
-            "card_brand": m.card_brand,
-            "nickname": m.nickname,
-            "is_default": m.is_default,
-            "created_at": m.created_at.isoformat()
-        }
-        for m in methods
-    ]
-
-
-@app.delete("/api/customers/{customer_id}/payment-methods/{method_id}")
-async def delete_saved_payment_method(
-    customer_id: int,
-    method_id: int,
-    db: Session = Depends(get_db),
-):
-    """Delete a saved payment method"""
-    from models import SavedPaymentMethod
-    
-    method = db.query(SavedPaymentMethod).filter(
-        SavedPaymentMethod.id == method_id,
-        SavedPaymentMethod.customer_id == customer_id
-    ).first()
-    
-    if not method:
-        raise HTTPException(status_code=404, detail="Payment method not found")
-    
-    db.delete(method)
-    db.commit()
-    
-    return {"message": "Payment method deleted successfully"}
-
-
 @app.get("/api/config")
 async def get_config():
     import os
@@ -1709,312 +1457,9 @@ async def get_config():
         "admin_commission_percent": int(os.getenv("ADMIN_COMMISSION_PERCENT", 20)),
         "dispatcher_commission_percent": int(os.getenv("DISPATCHER_COMMISSION_PERCENT", 2)),
         "super_admin_commission_percent": int(os.getenv("SUPER_ADMIN_COMMISSION_PERCENT", 3)),
-        "payment_methods": ["RAZORPAY", "PHONEPE", "GOOGLEPAY", "UPI", "QR_CODE", "CASH"],
+        "payment_methods": ["RAZORPAY", "PHONEPE", "CASH"],
         "app_name": os.getenv("APP_NAME", "DGDS Clone"),
-        "merchant_upi_id": os.getenv("MERCHANT_UPI_ID", "merchant@upi"),
-        "merchant_name": os.getenv("MERCHANT_NAME", "DGDS"),
     }
-
-
-@app.get("/api/payments/generate-qr/{transaction_id}")
-async def generate_payment_qr(
-    transaction_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Generate UPI QR code for payment
-    Returns base64 encoded QR code image
-    """
-    # Get transaction details
-    transaction = db.query(RideTransaction).filter(RideTransaction.id == transaction_id).first()
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    
-    # Get merchant UPI details from environment
-    merchant_upi_id = os.getenv("MERCHANT_UPI_ID", "merchant@upi")
-    merchant_name = os.getenv("MERCHANT_NAME", "DGDS")
-    
-    # Create UPI payment URL
-    amount = float(transaction.total_amount)
-    transaction_note = f"Payment for {transaction.transaction_number}"
-    
-    upi_url = f"upi://pay?pa={merchant_upi_id}&pn={merchant_name}&am={amount}&cu=INR&tn={transaction_note}"
-    
-    # Generate QR code
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(upi_url)
-    qr.make(fit=True)
-    
-    # Create QR code image
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    # Convert to base64
-    buffer = io.BytesIO()
-    img.save(buffer, format='PNG')
-    buffer.seek(0)
-    img_base64 = base64.b64encode(buffer.getvalue()).decode()
-    
-    return {
-        "qr_code": f"data:image/png;base64,{img_base64}",
-        "upi_url": upi_url,
-        "merchant_upi_id": merchant_upi_id,
-        "merchant_name": merchant_name,
-        "amount": amount,
-        "transaction_number": transaction.transaction_number
-    }
-
-
-# Tenant Management Endpoints
-@app.post("/api/super-admin/tenants", response_model=dict)
-async def create_tenant(
-    name: str,
-    code: str,
-    description: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Create a new tenant
-    Only accessible by Super Admin
-    """
-    if current_user.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only Super Admin can create tenants")
-    
-    # Check if tenant code already exists
-    existing_tenant = db.query(Tenant).filter(Tenant.code == code).first()
-    if existing_tenant:
-        raise HTTPException(status_code=400, detail="Tenant code already exists")
-    
-    # Create new tenant
-    tenant = Tenant(
-        name=name,
-        code=code,
-        description=description,
-        is_active=True
-    )
-    db.add(tenant)
-    db.commit()
-    db.refresh(tenant)
-    
-    return {
-        "id": tenant.id,
-        "name": tenant.name,
-        "code": tenant.code,
-        "description": tenant.description,
-        "is_active": tenant.is_active,
-        "created_at": tenant.created_at
-    }
-
-
-@app.get("/api/super-admin/tenants", response_model=list)
-async def get_all_tenants(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get all tenants
-    Only accessible by Super Admin
-    """
-    if current_user.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only Super Admin can view tenants")
-    
-    tenants = db.query(Tenant).all()
-    return [
-        {
-            "id": t.id,
-            "name": t.name,
-            "code": t.code,
-            "description": t.description,
-            "is_active": t.is_active,
-            "created_at": t.created_at,
-            "customer_count": len(t.customers),
-            "driver_count": len(t.drivers),
-            "dispatcher_count": len(t.dispatchers),
-            "transaction_count": len(t.ride_transactions)
-        }
-        for t in tenants
-    ]
-
-
-@app.post("/api/super-admin/tenants/{tenant_id}/reset")
-async def reset_tenant_data(
-    tenant_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Reset all data for a specific tenant
-    Only accessible by Super Admin
-    """
-    if current_user.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only Super Admin can reset tenant data")
-    
-    # Get tenant
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    try:
-        # Delete all tenant data in order of dependencies
-        # Delete payment transactions
-        db.query(PaymentTransaction).filter(PaymentTransaction.tenant_id == tenant_id).delete()
-        
-        # Delete ride transaction events
-        db.query(RideTransactionEvent).filter(RideTransactionEvent.transaction_id.in_(
-            db.query(RideTransaction.id).filter(RideTransaction.tenant_id == tenant_id)
-        )).delete()
-        
-        # Delete ride transactions
-        db.query(RideTransaction).filter(RideTransaction.tenant_id == tenant_id).delete()
-        
-        # Delete saved payment methods
-        db.query(SavedPaymentMethod).filter(SavedPaymentMethod.tenant_id == tenant_id).delete()
-        
-        # Delete customer vehicles
-        db.query(CustomerVehicle).filter(CustomerVehicle.customer_id.in_(
-            db.query(Customer.id).filter(Customer.tenant_id == tenant_id)
-        )).delete()
-        
-        # Delete customer addresses and contacts
-        db.query(CustomerAddress).filter(CustomerAddress.customer_id.in_(
-            db.query(Customer.id).filter(Customer.tenant_id == tenant_id)
-        )).delete()
-        
-        db.query(ContactNumber).filter(ContactNumber.customer_id.in_(
-            db.query(Customer.id).filter(Customer.tenant_id == tenant_id)
-        )).delete()
-        
-        # Delete customers
-        db.query(Customer).filter(Customer.tenant_id == tenant_id).delete()
-        
-        # Delete driver contacts and addresses
-        db.query(DriverContactNumber).filter(DriverContactNumber.driver_id.in_(
-            db.query(Driver.id).filter(Driver.tenant_id == tenant_id)
-        )).delete()
-        
-        db.query(DriverAddress).filter(DriverAddress.driver_id.in_(
-            db.query(Driver.id).filter(Driver.tenant_id == tenant_id)
-        )).delete()
-        
-        # Delete drivers
-        db.query(Driver).filter(Driver.tenant_id == tenant_id).delete()
-        
-        # Delete dispatchers
-        db.query(Dispatcher).filter(Dispatcher.tenant_id == tenant_id).delete()
-        
-        # Delete tenant admin users
-        db.query(User).filter(
-            User.tenant_id == tenant_id,
-            User.role.in_([UserRole.ADMIN, UserRole.TENANT_ADMIN, UserRole.DISPATCHER, UserRole.DRIVER, UserRole.CUSTOMER])
-        ).delete()
-        
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": f"All data for tenant '{tenant.name}' has been reset successfully"
-        }
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error resetting tenant data: {str(e)}")
-
-
-@app.post("/api/seed-database")
-async def seed_database_endpoint(
-    tenant_name: str = "DGDS Clone",
-    db: Session = Depends(get_db)
-):
-    """
-    Seed database with initial data
-    Public endpoint for initial setup
-    """
-    # Check if database is already seeded (check if any users exist)
-    existing_users = db.query(User).count()
-    if existing_users > 0:
-        raise HTTPException(
-            status_code=400, 
-            detail="Database already seeded. Use reset endpoint if you're a Super Admin."
-        )
-    
-    try:
-        import subprocess
-        import os
-        
-        # Run the reset script
-        script_path = os.path.join(os.path.dirname(__file__), "reset_db.py")
-        result = subprocess.run(
-            ["python", script_path, tenant_name],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if result.returncode == 0:
-            return {
-                "success": True,
-                "message": f"Database seeded successfully for tenant: {tenant_name}",
-                "output": result.stdout,
-                "tenant_name": tenant_name
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database seeding failed: {result.stderr}"
-            )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Database seeding timed out")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error seeding database: {str(e)}")
-
-
-@app.post("/api/admin/reset-database")
-async def reset_database_endpoint(
-    tenant_name: str = "DGDS Clone",
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Reset database and reseed with fresh data
-    Only accessible by Super Admin
-    """
-    # Check if user is super admin
-    if current_user.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only Super Admin can reset database")
-    
-    try:
-        import subprocess
-        import os
-        
-        # Run the reset script
-        script_path = os.path.join(os.path.dirname(__file__), "reset_db.py")
-        result = subprocess.run(
-            ["python", script_path, tenant_name],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if result.returncode == 0:
-            return {
-                "success": True,
-                "message": f"Database reset successfully for tenant: {tenant_name}",
-                "output": result.stdout,
-                "tenant_name": tenant_name
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database reset failed: {result.stderr}"
-            )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Database reset timed out")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error resetting database: {str(e)}")
 
 
 @app.get("/")
@@ -2062,23 +1507,6 @@ async def register(request: Request, user_data: UserRegister, db: Session = Depe
     if not has_special:
         raise HTTPException(status_code=400, detail="Password must contain at least one special character (@$!%*?&)")
     
-    # Assign default tenant for non-Super Admin users
-    default_tenant_id = None
-    if role != UserRole.SUPER_ADMIN:
-        default_tenant = db.query(Tenant).filter(Tenant.code == "DGDS_CLONE").first()
-        if not default_tenant:
-            # Create default tenant if it doesn't exist
-            default_tenant = Tenant(
-                name="DGDS Clone",
-                code="DGDS_CLONE",
-                description="Default tenant for DGDS Clone application",
-                is_active=True,
-            )
-            db.add(default_tenant)
-            db.commit()
-            db.refresh(default_tenant)
-        default_tenant_id = default_tenant.id
-
     # Create user
     try:
         hashed_password = get_password_hash(user_data.password)
@@ -2086,7 +1514,6 @@ async def register(request: Request, user_data: UserRegister, db: Session = Depe
             email=user_data.email,
             password_hash=hashed_password,
             role=role,
-            tenant_id=default_tenant_id,
             customer_id=user_data.customer_id,
             driver_id=user_data.driver_id,
             dispatcher_id=user_data.dispatcher_id,
@@ -2126,22 +1553,10 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={
-          "sub": str(user.id), 
-          "email": user.email, 
-          "role": user.role.value,
-          "tenant_id": str(user.tenant_id) if user.tenant_id else None
-        },
+        data={"sub": str(user.id), "email": user.email, "role": user.role.value},
         expires_delta=access_token_expires
     )
     
-    # Get tenant info for response
-    tenant_info = None
-    if user.tenant_id:
-        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
-        if tenant:
-            tenant_info = {"id": tenant.id, "name": tenant.name, "code": tenant.code}
-
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -2152,8 +1567,69 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
             "role": user.role.value,
             "is_active": user.is_active,
             "is_verified": user.is_verified,
-            "tenant_id": user.tenant_id,
-            "tenant": tenant_info,
+        }
+    }
+
+
+@app.post("/api/auth/quick-login/{role}")
+@limiter.limit("10/minute")
+async def quick_login(request: Request, role: str, db: Session = Depends(get_db)):
+    """Quick login for testing - creates/logs in with default test accounts"""
+    from datetime import datetime
+    
+    # Define test accounts for each role
+    test_accounts = {
+        "customer": {"email": "customer@test.com", "password": "test123", "role": UserRole.CUSTOMER},
+        "driver": {"email": "driver@test.com", "password": "test123", "role": UserRole.DRIVER},
+        "dispatcher": {"email": "dispatcher@test.com", "password": "test123", "role": UserRole.DISPATCHER},
+        "admin": {"email": "admin@test.com", "password": "test123", "role": UserRole.ADMIN},
+        "super_admin": {"email": "superadmin@test.com", "password": "test123", "role": UserRole.SUPER_ADMIN}
+    }
+    
+    if role not in test_accounts:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    
+    account = test_accounts[role]
+    
+    # Check if user exists
+    user = db.query(User).filter(User.email == account["email"]).first()
+    
+    # Create user if doesn't exist
+    if not user:
+        # Truncate password to 72 bytes for bcrypt compatibility
+        password = account["password"][:72]
+        user = User(
+            email=account["email"],
+            password_hash=get_password_hash(password),
+            role=account["role"],
+            is_active=True,
+            is_verified=True
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    
+    # Update last login
+    user.last_login = datetime.utcnow()
+    db.commit()
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": str(user.id), "email": user.email, "role": user.role.value},
+        expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "role": user.role.value,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
         }
     }
 
@@ -2187,122 +1663,6 @@ async def logout(current_user: User = Depends(get_current_user)):
     return {"message": "Logged out successfully"}
 
 
-@app.post("/api/auth/quick-login/{role}")
-@limiter.limit("20/minute")
-async def quick_login(
-    request: Request,
-    role: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Quick login for development/testing.
-    Only enabled when ENABLE_DEV_AUTH environment variable is set to 'true'.
-    """
-    # Check if dev auth is enabled
-    if os.getenv("ENABLE_DEV_AUTH", "false").lower() != "true":
-        raise HTTPException(
-            status_code=404,
-            detail="Quick login is not available"
-        )
-    
-    # Validate role
-    try:
-        user_role = UserRole(role.upper())
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid role. Must be one of: {[r.value for r in UserRole]}"
-        )
-    
-    # Default test accounts based on role
-    test_accounts = {
-        UserRole.CUSTOMER: "john@example.com",
-        UserRole.DRIVER: "rajesh@dgds.com",
-        UserRole.DISPATCHER: "priya@dgds.com",
-        UserRole.ADMIN: "admin@dgds.com",
-        UserRole.SUPER_ADMIN: "superadmin@dgds.com",
-    }
-    
-    email = test_accounts.get(user_role)
-    if not email:
-        raise HTTPException(
-            status_code=400,
-            detail="No test account available for this role"
-        )
-    
-    # Find user
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not user.is_active:
-        raise HTTPException(
-            status_code=404,
-            detail="Test account not found or inactive. Please run seed data first."
-        )
-    
-    # Update last login
-    from datetime import datetime
-    user.last_login = datetime.utcnow()
-    db.commit()
-    
-    # Create access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={
-          "sub": str(user.id), 
-          "email": user.email, 
-          "role": user.role.value,
-          "tenant_id": str(user.tenant_id) if user.tenant_id else None
-        },
-        expires_delta=access_token_expires
-    )
-    
-    # Get tenant info for response
-    tenant_info = None
-    if user.tenant_id:
-        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
-        if tenant:
-            tenant_info = {"id": tenant.id, "name": tenant.name, "code": tenant.code}
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "role": user.role.value,
-            "is_active": user.is_active,
-            "is_verified": user.is_verified,
-            "tenant_id": user.tenant_id,
-            "tenant": tenant_info,
-        },
-        "message": f"Logged in as test {user_role.value} account"
-    }
-
-
-@app.post("/api/seed")
-async def seed_database(db: Session = Depends(get_db)):
-    """
-    Seed the database with test data.
-    Only enabled when ENABLE_DEV_AUTH environment variable is set to 'true'.
-    """
-    # Check if dev auth is enabled
-    if os.getenv("ENABLE_DEV_AUTH", "false").lower() != "true":
-        raise HTTPException(
-            status_code=404,
-            detail="Seed endpoint is not available"
-        )
-    
-    try:
-        from seed_data import run_seed
-        run_seed()
-        return {"message": "Database seeded successfully with test data"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to seed database: {str(e)}"
-        )
-
-
 @app.get("/api/health")
 async def health_check(db: Session = Depends(get_db)):
     from sqlalchemy import text
@@ -2322,516 +1682,271 @@ async def health_check(db: Session = Depends(get_db)):
         }
 
 
-# Payment Screenshot Endpoints
-@app.post("/api/trips/{trip_id}/payment-screenshot", response_model=PaymentScreenshotResponse)
-@limiter.limit("5/minute")
-async def upload_payment_screenshot(
-    request: Request,
-    trip_id: int,
-    screenshot: UploadFile = File(...),
-    payment_date: str = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Upload a payment screenshot for a trip"""
-    # Check if trip exists and user has access
-    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Apply tenant filtering
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None and trip.tenant_id != tenant_filter:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Validate file
-    if not screenshot.content_type.startswith('image/'):
-        raise HTTPException(status_code=400, detail="File must be an image")
-    
-    if screenshot.size and screenshot.size > 10 * 1024 * 1024:  # 10MB limit
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
-    
-    try:
-        # Read file data
-        file_data = await screenshot.read()
-        
-        # Parse payment date
-        from datetime import datetime
-        parsed_payment_date = datetime.fromisoformat(payment_date.replace('Z', '+00:00'))
-        
-        # Create payment screenshot record
-        payment_screenshot = PaymentScreenshot(
-            transaction_id=trip_id,
-            screenshot_data=file_data,
-            screenshot_url=f"/api/trips/{trip_id}/payment-screenshot/{current_user.id}",
-            file_name=screenshot.filename,
-            file_size=len(file_data),
-            mime_type=screenshot.content_type,
-            payment_date=parsed_payment_date,
-            uploaded_by=current_user.id,
-            tenant_id=current_user.tenant_id
-        )
-        
-        db.add(payment_screenshot)
-        db.commit()
-        db.refresh(payment_screenshot)
-        
-        return payment_screenshot
-        
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to upload screenshot: {str(e)}")
+# ============================================================================
+# DETAILED DRILL-DOWN REPORTS WITH COMMISSION BREAKDOWN
+# ============================================================================
+
+from detailed_reports import (
+    generate_detailed_customer_report,
+    generate_detailed_dispatcher_report,
+    generate_detailed_admin_report,
+    generate_detailed_super_admin_report
+)
+from driver_analytics import (
+    generate_comprehensive_driver_analytics,
+    get_driver_registration_charges_timeline
+)
+from reports import ReportFilters
 
 
-@app.get("/api/trips/{trip_id}/payment-screenshot/{user_id}")
-async def get_payment_screenshot(
-    trip_id: int,
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Get payment screenshot image"""
-    # Check if trip exists and user has access
-    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Apply tenant filtering
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None and trip.tenant_id != tenant_filter:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Get screenshot
-    screenshot = db.query(PaymentScreenshot).filter(
-        PaymentScreenshot.transaction_id == trip_id,
-        PaymentScreenshot.uploaded_by == user_id
-    ).first()
-    
-    if not screenshot:
-        raise HTTPException(status_code=404, detail="Screenshot not found")
-    
-    from fastapi.responses import Response
-    return Response(
-        content=screenshot.screenshot_data,
-        media_type=screenshot.mime_type,
-        headers={"Content-Disposition": f"inline; filename={screenshot.file_name}"}
-    )
-
-
-# Error Chat Endpoints
-@app.post("/api/trips/{trip_id}/error-chat", response_model=ErrorChatMessageResponse)
-@limiter.limit("10/minute")
-async def send_error_chat_message(
-    request: Request,
-    trip_id: int,
-    message_data: ErrorChatMessageCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Send an error chat message for a trip"""
-    # Check if trip exists and user has access
-    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Apply tenant filtering
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None and trip.tenant_id != tenant_filter:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    try:
-        # Create chat message
-        chat_message = ErrorChatMessage(
-            transaction_id=trip_id,
-            sender_id=current_user.id,
-            sender_type=current_user.role,
-            message=message_data.message,
-            timestamp=message_data.timestamp,
-            tenant_id=current_user.tenant_id
-        )
-        
-        db.add(chat_message)
-        db.commit()
-        db.refresh(chat_message)
-        
-        return chat_message
-        
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
-
-
-@app.get("/api/trips/{trip_id}/error-chat")
-async def get_error_chat_messages(
-    trip_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Get all error chat messages for a trip"""
-    # Check if trip exists and user has access
-    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Apply tenant filtering
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None and trip.tenant_id != tenant_filter:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Get messages
-    messages = db.query(ErrorChatMessage).filter(
-        ErrorChatMessage.transaction_id == trip_id
-    ).order_by(ErrorChatMessage.timestamp.asc()).all()
-    
-    return messages
-
-
-# Reporting and Analytics Endpoints
-@app.post("/api/reports/analytics")
+@app.post("/api/reports/detailed/customers")
 @limiter.limit("20/minute")
-async def get_analytics_report(
+async def get_detailed_customer_report(
     request: Request,
     filters: ReportFilters,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
-    """Generate comprehensive analytics report"""
-    # Apply tenant filter
-    tenant_filter = await get_tenant_filter(current_user)
+    """Generate detailed customer report with transaction and payment breakdown"""
     if tenant_filter is not None:
         filters.tenant_id = tenant_filter
     
+    return generate_detailed_customer_report(db, filters)
+
+
+@app.post("/api/reports/detailed/dispatchers")
+@limiter.limit("20/minute")
+async def get_detailed_dispatcher_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """Generate detailed dispatcher report with commission earnings breakdown"""
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_detailed_dispatcher_report(db, filters)
+
+
+@app.post("/api/reports/detailed/admin")
+@limiter.limit("20/minute")
+async def get_detailed_admin_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """Generate detailed admin report with commission earnings breakdown"""
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_detailed_admin_report(db, filters)
+
+
+@app.post("/api/reports/detailed/super-admin")
+@limiter.limit("20/minute")
+async def get_detailed_super_admin_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """Generate detailed super admin report with platform-wide statistics and commission breakdown"""
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_detailed_super_admin_report(db, filters)
+
+
+# ============================================================================
+# COMPREHENSIVE DRIVER ANALYTICS
+# ============================================================================
+
+@app.post("/api/analytics/drivers/comprehensive")
+@limiter.limit("20/minute")
+async def get_comprehensive_driver_analytics(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """
+    Generate comprehensive driver analytics including:
+    - Total revenue generated
+    - Commission breakdown (earned, paid, pending)
+    - Registration charges by time period
+    - Transaction completion status (fully paid, partially paid, unpaid)
+    - Detailed payment tracking
+    """
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_comprehensive_driver_analytics(db, filters)
+
+
+@app.get("/api/analytics/drivers/registration-charges")
+@limiter.limit("20/minute")
+async def get_driver_registration_timeline(
+    request: Request,
+    driver_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """
+    Get driver registration charges timeline
+    Breaks down by day, month, and year
+    """
+    return get_driver_registration_charges_timeline(db, driver_id, tenant_filter)
+
+
+# ============================================================================
+# ANALYTICS OVERVIEW AND OTHER REPORTS
+# ============================================================================
+
+@app.post("/api/reports/analytics")
+@limiter.limit("20/minute")
+async def get_analytics_overview(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """Generate comprehensive analytics overview"""
+    from reports import generate_analytics_report
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
     return generate_analytics_report(db, filters)
 
 
-@app.post("/api/reports/by-customer")
-@limiter.limit("20/minute")
-async def get_customer_report(
-    request: Request,
-    filters: ReportFilters,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Generate report grouped by customer"""
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None:
-        filters.tenant_id = tenant_filter
-    
-    return generate_customer_report(db, filters)
-
-
-@app.post("/api/reports/by-driver")
-@limiter.limit("20/minute")
-async def get_driver_report(
-    request: Request,
-    filters: ReportFilters,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Generate report grouped by driver"""
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None:
-        filters.tenant_id = tenant_filter
-    
-    return generate_driver_report(db, filters)
-
-
-@app.post("/api/reports/by-vehicle")
-@limiter.limit("20/minute")
-async def get_vehicle_report(
-    request: Request,
-    filters: ReportFilters,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Generate report grouped by vehicle"""
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None:
-        filters.tenant_id = tenant_filter
-    
-    return generate_vehicle_report(db, filters)
-
-
-@app.post("/api/reports/payment-release")
-@limiter.limit("20/minute")
-async def get_payment_release_report(
-    request: Request,
-    filters: ReportFilters,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Generate payment release tracking report"""
-    tenant_filter = await get_tenant_filter(current_user)
-    if tenant_filter is not None:
-        filters.tenant_id = tenant_filter
-    
-    return generate_payment_release_report(db, filters)
-
-
-@app.post("/api/reports/by-transaction")
+@app.post("/api/reports/transactions")
 @limiter.limit("20/minute")
 async def get_transaction_report(
     request: Request,
     filters: ReportFilters,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
-    """Generate comprehensive transaction-based report with commission breakdown"""
-    tenant_filter = await get_tenant_filter(current_user)
+    """Generate transaction report"""
+    from reports import generate_transaction_report
     if tenant_filter is not None:
         filters.tenant_id = tenant_filter
-    
     return generate_transaction_report(db, filters)
 
 
-# ============================================================================
-# EXPORT/IMPORT ENDPOINTS
-# ============================================================================
-
-@app.get("/api/export/customers")
-@limiter.limit("10/minute")
-async def export_customers(
+@app.post("/api/reports/vehicles")
+@limiter.limit("20/minute")
+async def get_vehicle_report(
     request: Request,
+    filters: ReportFilters,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
-    """Export customers to CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    csv_content = export_customers_to_csv(db, tenant_filter)
-    
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=customers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-
-
-@app.get("/api/export/drivers")
-@limiter.limit("10/minute")
-async def export_drivers(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Export drivers to CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    csv_content = export_drivers_to_csv(db, tenant_filter)
-    
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=drivers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-
-
-@app.get("/api/export/vehicles")
-@limiter.limit("10/minute")
-async def export_vehicles(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Export vehicles to CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    csv_content = export_vehicles_to_csv(db, tenant_filter)
-    
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=vehicles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-
-
-@app.get("/api/export/dispatchers")
-@limiter.limit("10/minute")
-async def export_dispatchers(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Export dispatchers to CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    csv_content = export_dispatchers_to_csv(db, tenant_filter)
-    
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=dispatchers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-
-
-@app.get("/api/export/trips")
-@limiter.limit("10/minute")
-async def export_trips(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Export trips/transactions to CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    csv_content = export_trips_to_csv(db, tenant_filter)
-    
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=trips_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-
-
-@app.post("/api/import/customers")
-@limiter.limit("5/minute")
-async def import_customers(
-    request: Request,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Import customers from CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    if not tenant_filter:
-        raise HTTPException(status_code=400, detail="Tenant ID required for import")
-    
-    content = await file.read()
-    csv_content = content.decode('utf-8')
-    
-    result = import_customers_from_csv(db, csv_content, tenant_filter)
-    return result
-
-
-@app.post("/api/import/drivers")
-@limiter.limit("5/minute")
-async def import_drivers(
-    request: Request,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Import drivers from CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    if not tenant_filter:
-        raise HTTPException(status_code=400, detail="Tenant ID required for import")
-    
-    content = await file.read()
-    csv_content = content.decode('utf-8')
-    
-    result = import_drivers_from_csv(db, csv_content, tenant_filter)
-    return result
-
-
-@app.post("/api/import/vehicles")
-@limiter.limit("5/minute")
-async def import_vehicles(
-    request: Request,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Import vehicles from CSV"""
-    tenant_filter = await get_tenant_filter(current_user)
-    if not tenant_filter:
-        raise HTTPException(status_code=400, detail="Tenant ID required for import")
-    
-    content = await file.read()
-    csv_content = content.decode('utf-8')
-    
-    result = import_vehicles_from_csv(db, csv_content, tenant_filter)
-    return result
+    """Generate vehicle report"""
+    from reports import generate_vehicle_report
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    return generate_vehicle_report(db, filters)
 
 
 # ============================================================================
-# BOOKING NOTIFICATION ENDPOINTS
+# DATABASE SEEDING ENDPOINT
 # ============================================================================
 
-@app.post("/api/notifications/booking-confirmation")
-@limiter.limit("30/minute")
-async def send_booking_confirmation(
+# Global variable to track seeding status
+seeding_status = {
+    "is_running": False,
+    "progress": 0,
+    "message": "",
+    "completed": False,
+    "error": None
+}
+
+@app.post("/api/admin/seed-database")
+@limiter.limit("5/hour")
+async def trigger_database_seeding(
     request: Request,
-    booking_id: int,
-    notification_type: str = "both",  # email, whatsapp, or both
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Send booking confirmation notification"""
-    trip = db.query(RideTransaction).filter(RideTransaction.id == booking_id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Booking not found")
+    """
+    Trigger async database seeding with test data
+    Only accessible by admin users
+    """
+    global seeding_status
     
-    # Generate friendly booking ID if not exists
-    if not trip.friendly_booking_id:
-        trip.friendly_booking_id = generate_friendly_booking_id()
-        db.commit()
+    # Check if user is admin
+    if current_user.role not in ["admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only admins can seed the database")
     
-    # Prepare booking data
-    booking_data = {
-        'friendly_booking_id': trip.friendly_booking_id,
-        'transaction_number': trip.transaction_number,
-        'status': trip.status,
-        'pickup_location': trip.pickup_location,
-        'destination_location': trip.destination_location,
-        'customer_name': trip.customer_name if hasattr(trip, 'customer_name') else trip.customer.name,
-        'customer_phone': trip.customer.phone if trip.customer else 'N/A',
-        'passenger_count': 1,
-        'vehicle_type': trip.vehicle_type if hasattr(trip, 'vehicle_type') else 'N/A',
-        'pickup_time': trip.pickup_time.strftime('%b %d, %Y, %I:%M %p') if trip.pickup_time else 'N/A',
-        'min_fare': float(trip.total_amount * 0.8) if trip.total_amount else 0,
-        'max_fare': float(trip.total_amount * 1.2) if trip.total_amount else 0,
-        'distance_km': trip.distance_km if hasattr(trip, 'distance_km') else 0,
-        'duration_minutes': trip.duration_minutes if hasattr(trip, 'duration_minutes') else 0,
-        'tracking_url': f"http://localhost:3000/customer/rides/{trip.id}"
+    # Check if seeding is already running
+    if seeding_status["is_running"]:
+        return {
+            "status": "already_running",
+            "message": "Database seeding is already in progress",
+            "progress": seeding_status["progress"]
+        }
+    
+    # Reset status
+    seeding_status = {
+        "is_running": True,
+        "progress": 0,
+        "message": "Starting database seeding...",
+        "completed": False,
+        "error": None
     }
     
-    notifications = {}
-    if notification_type in ['email', 'both']:
-        notifications['email'] = format_email_booking_notification(booking_data)
-    if notification_type in ['whatsapp', 'both']:
-        notifications['whatsapp'] = format_whatsapp_booking_notification(booking_data)
+    # Run seeding in background
+    def run_seeding():
+        global seeding_status
+        try:
+            from seed_test_data import seed_database
+            
+            def progress_callback(message, percentage):
+                seeding_status["progress"] = percentage
+                seeding_status["message"] = message
+            
+            seed_database(progress_callback=progress_callback)
+            
+            seeding_status["completed"] = True
+            seeding_status["is_running"] = False
+            seeding_status["message"] = "Database seeding completed successfully!"
+            
+        except Exception as e:
+            seeding_status["error"] = str(e)
+            seeding_status["is_running"] = False
+            seeding_status["message"] = f"Error during seeding: {str(e)}"
+    
+    background_tasks.add_task(run_seeding)
     
     return {
-        'success': True,
-        'booking_id': trip.friendly_booking_id,
-        'notifications': notifications
+        "status": "started",
+        "message": "Database seeding started in background"
     }
 
 
-@app.post("/api/notifications/driver-assignment")
-@limiter.limit("30/minute")
-async def send_driver_assignment(
+@app.get("/api/admin/seed-database/status")
+@limiter.limit("60/minute")
+async def get_seeding_status(
     request: Request,
-    booking_id: int,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Send driver assignment notification"""
-    trip = db.query(RideTransaction).filter(RideTransaction.id == booking_id).first()
-    if not trip:
-        raise HTTPException(status_code=404, detail="Booking not found")
+    """Get current status of database seeding"""
+    if current_user.role not in ["admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only admins can check seeding status")
     
-    booking_data = {
-        'friendly_booking_id': trip.friendly_booking_id,
-        'customer_name': trip.customer.name if trip.customer else 'Customer',
-        'pickup_time': trip.pickup_time.strftime('%b %d, %Y, %I:%M %p') if trip.pickup_time else 'N/A',
-        'pickup_location': trip.pickup_location,
-        'tracking_url': f"http://localhost:3000/customer/rides/{trip.id}"
-    }
-    
-    driver_data = {
-        'name': trip.driver.name if trip.driver else 'N/A',
-        'phone': trip.driver.phone if trip.driver else 'N/A',
-        'vehicle_type': trip.driver.vehicle_type if trip.driver else 'N/A',
-        'vehicle_number': trip.driver.vehicle_number if trip.driver else 'N/A',
-        'rating': trip.driver.rating if trip.driver else 0
-    }
-    
-    notifications = format_driver_assignment_notification(booking_data, driver_data)
-    
-    return {
-        'success': True,
-        'booking_id': trip.friendly_booking_id,
-        'notifications': notifications
-    }
+    return seeding_status
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "2070"))
-    reload = os.getenv("UVICORN_RELOAD", "false").lower() == "true"
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload)
+    uvicorn.run("main:app", host="0.0.0.0", port=2070, reload=True)

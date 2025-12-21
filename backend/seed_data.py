@@ -16,10 +16,7 @@ from models import (
     PaymentMethod,
     RideTransaction,
     RideTransactionEvent,
-    User,
-    UserRole,
 )
-from auth import get_password_hash
 
 
 def build_customer(index: int) -> Customer:
@@ -118,80 +115,6 @@ def seed_dispatchers(session, count: int = 3):
             email=f"dispatcher{idx}@example.com",
         )
         session.add(dispatcher)
-
-
-def seed_users(session):
-    """Seed user accounts for quick testing"""
-    # Default password for all seeded accounts
-    default_password = "password123"
-    
-    # Import bcrypt directly to avoid version issues
-    import bcrypt
-    
-    # Hash password manually
-    hashed_password = bcrypt.hashpw(default_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    
-    # Seed customer users
-    for idx in range(1, 11):
-        email = f"customer{idx}@example.com"
-        customer = session.query(Customer).filter_by(email=email).first()
-        if customer and not session.query(User).filter_by(email=email).first():
-            user = User(
-                email=email,
-                password_hash=hashed_password,
-                role=UserRole.CUSTOMER,
-                is_active=True,
-                is_verified=True,
-                customer_id=customer.id
-            )
-            session.add(user)
-    
-    # Seed driver users
-    for idx in range(1, 16):
-        name = f"Driver {idx}"
-        driver = session.query(Driver).filter_by(name=name).first()
-        if driver and not session.query(User).filter_by(email=f"driver{idx}@example.com").first():
-            user = User(
-                email=f"driver{idx}@example.com",
-                password_hash=hashed_password,
-                role=UserRole.DRIVER,
-                is_active=True,
-                is_verified=True,
-                driver_id=driver.id
-            )
-            session.add(user)
-    
-    # Seed dispatcher users
-    for idx in range(1, 4):
-        email = f"dispatcher{idx}@example.com"
-        dispatcher = session.query(Dispatcher).filter_by(email=email).first()
-        if dispatcher and not session.query(User).filter_by(email=email).first():
-            user = User(
-                email=email,
-                password_hash=hashed_password,
-                role=UserRole.DISPATCHER,
-                is_active=True,
-                is_verified=True,
-                dispatcher_id=dispatcher.id
-            )
-            session.add(user)
-    
-    # Seed admin users
-    admin_credentials = [
-        ("admin@example.com", UserRole.ADMIN),
-        ("superadmin@example.com", UserRole.SUPER_ADMIN),
-    ]
-    
-    for email, role in admin_credentials:
-        if not session.query(User).filter_by(email=email).first():
-            user = User(
-                email=email,
-                password_hash=hashed_password,
-                role=role,
-                is_active=True,
-                is_verified=True
-            )
-            session.add(user)
 
 
 def seed_admin_contacts(session, count: int = 4):
@@ -468,28 +391,9 @@ def run_seed():
         seed_drivers(session)
         seed_dispatchers(session)
         seed_admin_contacts(session)
-        seed_users(session)  # Seed user accounts
         seed_transactions(session)
         session.commit()
         print("Seed data inserted successfully.")
-        print("\n=== Quick Login Credentials ===")
-        print("Default password for all accounts: password123")
-        print("\nCustomer accounts:")
-        print("  customer1@example.com")
-        print("  customer2@example.com")
-        print("  ... (up to customer10@example.com)")
-        print("\nDriver accounts:")
-        print("  driver1@example.com")
-        print("  driver2@example.com")
-        print("  ... (up to driver15@example.com)")
-        print("\nDispatcher accounts:")
-        print("  dispatcher1@example.com")
-        print("  dispatcher2@example.com")
-        print("  dispatcher3@example.com")
-        print("\nAdmin accounts:")
-        print("  admin@example.com (Admin role)")
-        print("  superadmin@example.com (Super Admin role)")
-        print("===============================\n")
     except Exception as exc:
         session.rollback()
         print("Seeding failed, rolled back changes.")

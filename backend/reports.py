@@ -147,10 +147,10 @@ def generate_analytics_report(db: Session, filters: ReportFilters):
             {
                 'id': t.id,
                 'transaction_number': t.transaction_number,
-                'customer_name': t.customer_name,
-                'driver_name': t.driver_name,
+                'customer_id': t.customer_id,
+                'driver_id': t.driver_id,
                 'amount': float(t.total_amount or 0),
-                'status': t.status,
+                'status': t.status.value if hasattr(t.status, 'value') else str(t.status),
                 'is_paid': t.is_paid,
                 'created_at': t.created_at.isoformat() if t.created_at else None,
             }
@@ -237,46 +237,145 @@ def generate_customer_report(db: Session, filters: ReportFilters):
 
 
 def generate_driver_report(db: Session, filters: ReportFilters):
-    """Generate report grouped by driver"""
+    """Generate comprehensive driver report with detailed transaction and commission breakdown"""
     start_date, end_date = get_date_range(
         filters.date_range.range_type,
         filters.date_range.start_date,
         filters.date_range.end_date
     )
     
-    query = db.query(
-        RideTransaction.driver_id,
-        RideTransaction.driver_name,
-        func.count(RideTransaction.id).label('trip_count'),
-        func.sum(RideTransaction.total_amount).label('total_earnings'),
-        func.sum(func.case((RideTransaction.status == 'COMPLETED', 1), else_=0)).label('completed_trips'),
-    ).filter(
+    # Base query for transactions
+    query = db.query(RideTransaction).filter(
         RideTransaction.created_at.between(start_date, end_date)
     )
     
     if filters.tenant_id:
         query = query.filter(RideTransaction.tenant_id == filters.tenant_id)
     
-    query = query.group_by(RideTransaction.driver_id, RideTransaction.driver_name)
+    if filters.driver_id:
+        query = query.filter(RideTransaction.driver_id == filters.driver_id)
     
-    results = query.all()
+    transactions = query.all()
+    
+    # Group by driver with detailed breakdown
+    driver_stats = {}
+    
+    for transaction in transactions:
+        driver_id = transaction.driver_id
+        if driver_id not in driver_stats:
+            driver = db.query(Driver).filter(Driver.id == driver_id).first()
+            driver_stats[driver_id] = {
+                'driver_id': driver_id,
+                'driver_name': driver.name if driver else transaction.driver_name,
+                'driver_email': driver.email if driver else 'N/A',
+                'driver_phone': driver.phone if driver else 'N/A',
+                'driver_rating': float(driver.rating) if driver and driver.rating else 0,
+                'total_bookings': 0,
+                'completed_bookings': 0,
+                'pending_bookings': 0,
+                'cancelled_bookings': 0,
+                'total_transactions': 0,
+                'total_revenue': 0,
+                'total_paid': 0,
+                'total_pending': 0,
+                'commission_breakdown': {
+                    'driver_earnings': 0,           # 79%
+                    'dispatcher_commission': 0,      # 18%
+                    'admin_commission': 0,           # 2%
+                    'super_admin_commission': 0      # 1%
+                },
+                'payment_status': {
+                    'paid_amount': 0,
+                    'pending_amount': 0,
+                    'paid_count': 0,
+                    'pending_count': 0
+                },
+                'transactions': []
+            }
+        
+        # Count bookings by status
+        driver_stats[driver_id]['total_bookings'] += 1
+        driver_stats[driver_id]['total_transactions'] += 1
+        
+        if transaction.status.value == 'COMPLETED':
+            driver_stats[driver_id]['completed_bookings'] += 1
+        elif transaction.status.value == 'CANCELLED':
+            driver_stats[driver_id]['cancelled_bookings'] += 1
+        else:
+            driver_stats[driver_id]['pending_bookings'] += 1
+        
+        # Revenue tracking
+        driver_stats[driver_id]['total_revenue'] += float(transaction.total_amount)
+        
+        # Payment tracking
+        if transaction.is_paid:
+            driver_stats[driver_id]['total_paid'] += float(transaction.paid_amount or 0)
+            driver_stats[driver_id]['payment_status']['paid_amount'] += float(transaction.paid_amount or 0)
+            driver_stats[driver_id]['payment_status']['paid_count'] += 1
+        else:
+            pending_amount = float(transaction.total_amount) - float(transaction.paid_amount or 0)
+            driver_stats[driver_id]['total_pending'] += pending_amount
+            driver_stats[driver_id]['payment_status']['pending_amount'] += pending_amount
+            driver_stats[driver_id]['payment_status']['pending_count'] += 1
+        
+        # Commission breakdown
+        driver_stats[driver_id]['commission_breakdown']['driver_earnings'] += float(transaction.driver_share)
+        driver_stats[driver_id]['commission_breakdown']['dispatcher_commission'] += float(transaction.dispatcher_share)
+        driver_stats[driver_id]['commission_breakdown']['admin_commission'] += float(transaction.admin_share)
+        driver_stats[driver_id]['commission_breakdown']['super_admin_commission'] += float(transaction.super_admin_share)
+        
+        # Get customer and dispatcher details
+        customer = db.query(Customer).filter(Customer.id == transaction.customer_id).first()
+        dispatcher = db.query(Dispatcher).filter(Dispatcher.id == transaction.dispatcher_id).first()
+        
+        # Detailed transaction record
+        driver_stats[driver_id]['transactions'].append({
+            'transaction_id': transaction.id,
+            'transaction_number': transaction.transaction_number,
+            'friendly_booking_id': transaction.friendly_booking_id,
+            'date': transaction.created_at.isoformat(),
+            'customer_id': transaction.customer_id,
+            'customer_name': customer.name if customer else 'N/A',
+            'customer_phone': customer.phone if customer else 'N/A',
+            'dispatcher_id': transaction.dispatcher_id,
+            'dispatcher_name': dispatcher.name if dispatcher else 'N/A',
+            'pickup_location': transaction.pickup_location,
+            'destination_location': transaction.destination_location,
+            'ride_duration_hours': transaction.ride_duration_hours,
+            'status': transaction.status.value,
+            'payment_method': transaction.payment_method.value,
+            'is_paid': transaction.is_paid,
+            'total_amount': float(transaction.total_amount),
+            'paid_amount': float(transaction.paid_amount or 0),
+            'pending_amount': float(transaction.total_amount) - float(transaction.paid_amount or 0),
+            'commission_split': {
+                'driver_share': float(transaction.driver_share),
+                'driver_percentage': 79,
+                'dispatcher_share': float(transaction.dispatcher_share),
+                'dispatcher_percentage': 18,
+                'admin_share': float(transaction.admin_share),
+                'admin_percentage': 2,
+                'super_admin_share': float(transaction.super_admin_share),
+                'super_admin_percentage': 1
+            }
+        })
     
     return {
+        'report_type': 'by_driver',
         'period': {
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
+            'range_type': filters.date_range.range_type
         },
-        'drivers': [
-            {
-                'driver_id': r.driver_id,
-                'driver_name': r.driver_name,
-                'trip_count': r.trip_count,
-                'completed_trips': r.completed_trips,
-                'total_earnings': float(r.total_earnings or 0),
-                'completion_rate': round((r.completed_trips / r.trip_count * 100) if r.trip_count > 0 else 0, 2),
-            }
-            for r in results
-        ]
+        'summary': {
+            'total_drivers': len(driver_stats),
+            'total_bookings': sum(d['total_bookings'] for d in driver_stats.values()),
+            'total_revenue': sum(d['total_revenue'] for d in driver_stats.values()),
+            'total_driver_earnings': sum(d['commission_breakdown']['driver_earnings'] for d in driver_stats.values()),
+            'total_paid': sum(d['total_paid'] for d in driver_stats.values()),
+            'total_pending': sum(d['total_pending'] for d in driver_stats.values())
+        },
+        'drivers': list(driver_stats.values())
     }
 
 
@@ -435,13 +534,29 @@ def generate_transaction_report(db: Session, filters: ReportFilters):
     commission_breakdown = calculate_commission_breakdown(total_payment)
     paid_commission_breakdown = calculate_commission_breakdown(total_paid)
     
+    # Cache for customer and driver names
+    customer_cache = {}
+    driver_cache = {}
+    
+    def get_customer_name(customer_id):
+        if customer_id not in customer_cache:
+            customer = db.query(Customer).filter(Customer.id == customer_id).first()
+            customer_cache[customer_id] = customer.name if customer else 'N/A'
+        return customer_cache[customer_id]
+    
+    def get_driver_name(driver_id):
+        if driver_id not in driver_cache:
+            driver = db.query(Driver).filter(Driver.id == driver_id).first()
+            driver_cache[driver_id] = driver.name if driver else 'N/A'
+        return driver_cache[driver_id]
+    
     # Group by customer
     customer_totals = {}
     for t in transactions:
         if t.customer_id not in customer_totals:
             customer_totals[t.customer_id] = {
                 'customer_id': t.customer_id,
-                'customer_name': t.customer_name,
+                'customer_name': get_customer_name(t.customer_id),
                 'total_amount': 0,
                 'paid_amount': 0,
                 'dues': 0,
@@ -460,7 +575,7 @@ def generate_transaction_report(db: Session, filters: ReportFilters):
         if t.driver_id and t.driver_id not in driver_totals:
             driver_totals[t.driver_id] = {
                 'driver_id': t.driver_id,
-                'driver_name': t.driver_name,
+                'driver_name': get_driver_name(t.driver_id),
                 'total_amount': 0,
                 'paid_amount': 0,
                 'dues': 0,
@@ -507,11 +622,11 @@ def generate_transaction_report(db: Session, filters: ReportFilters):
             'id': t.id,
             'transaction_number': t.transaction_number,
             'customer_id': t.customer_id,
-            'customer_name': t.customer_name,
+            'customer_name': get_customer_name(t.customer_id),
             'driver_id': t.driver_id,
-            'driver_name': t.driver_name,
+            'driver_name': get_driver_name(t.driver_id) if t.driver_id else 'N/A',
             'dispatcher_id': t.dispatcher_id,
-            'status': t.status,
+            'status': t.status.value if hasattr(t.status, 'value') else str(t.status),
             'is_paid': t.is_paid,
             'total_amount': amount,
             'created_at': t.created_at.isoformat() if t.created_at else None,

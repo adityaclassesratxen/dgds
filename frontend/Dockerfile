@@ -5,10 +5,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Remove node_modules if exists and install fresh
-RUN rm -rf node_modules package-lock.json && \
-    npm cache clean --force && \
-    npm install
+# Install dependencies including recharts (using legacy-peer-deps for React 19 compatibility)
+RUN npm cache clean --force && \
+    npm install --legacy-peer-deps
 
 # Copy source code
 COPY . .
