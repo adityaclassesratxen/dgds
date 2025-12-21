@@ -46,6 +46,7 @@ const AnalyticsDashboard = ({ api }) => {
 
   const reportTypes = [
     { value: 'analytics', label: t('reports.analytics'), icon: BarChart3 },
+    { value: 'by-transaction', label: 'By Transaction', icon: PieChart },
     { value: 'by-customer', label: t('reports.byCustomer'), icon: Users },
     { value: 'by-driver', label: t('reports.byDriver'), icon: Truck },
     { value: 'by-vehicle', label: t('reports.byVehicle'), icon: Car },
@@ -343,6 +344,271 @@ const AnalyticsDashboard = ({ api }) => {
     );
   };
 
+  const renderTransactionReport = () => {
+    if (!reportData || reportType !== 'by-transaction') return null;
+
+    const { summary, by_customer, by_driver, by_dispatcher, by_admin, by_super_admin, transactions } = reportData;
+    const [expandedTransaction, setExpandedTransaction] = useState(null);
+
+    return (
+      <div className="space-y-6">
+        {/* Commission Breakdown Summary */}
+        <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-2xl p-6">
+          <h3 className="text-xl font-semibold text-white mb-4">Commission Breakdown</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+              <p className="text-xs text-slate-400 mb-1">Driver Commission (79%)</p>
+              <p className="text-2xl font-bold text-emerald-400">
+                ₹{summary.commission_breakdown.driver_commission.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+              <p className="text-xs text-slate-400 mb-1">Dispatcher Commission (18%)</p>
+              <p className="text-2xl font-bold text-blue-400">
+                ₹{summary.commission_breakdown.dispatcher_commission.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+              <p className="text-xs text-slate-400 mb-1">Admin Commission (2%)</p>
+              <p className="text-2xl font-bold text-amber-400">
+                ₹{summary.commission_breakdown.admin_commission.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+              <p className="text-xs text-slate-400 mb-1">Super Admin Commission (1%)</p>
+              <p className="text-2xl font-bold text-purple-400">
+                ₹{summary.commission_breakdown.super_admin_commission.toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-slate-400">Total Transactions</p>
+              <Calendar className="h-5 w-5 text-blue-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">{summary.total_transactions}</p>
+          </div>
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-emerald-300">Total Payment</p>
+              <DollarSign className="h-5 w-5 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">₹{summary.total_payment.toLocaleString()}</p>
+          </div>
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-blue-300">Total Paid</p>
+              <CheckCircle2 className="h-5 w-5 text-blue-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">₹{summary.total_paid.toLocaleString()}</p>
+          </div>
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-red-300">Total Dues</p>
+              <AlertCircle className="h-5 w-5 text-red-400" />
+            </div>
+            <p className="text-2xl font-bold text-white">₹{summary.total_dues.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* By Customer */}
+        <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">By Customer</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Customer</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Transactions</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Total Amount</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Paid</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Dues</th>
+                </tr>
+              </thead>
+              <tbody>
+                {by_customer.map((customer, index) => (
+                  <tr key={index} className="border-b border-slate-800 hover:bg-slate-700/30">
+                    <td className="py-3 px-4 text-sm text-white">{customer.customer_name}</td>
+                    <td className="py-3 px-4 text-sm text-right text-slate-300">{customer.transaction_count}</td>
+                    <td className="py-3 px-4 text-sm text-right text-white">₹{customer.total_amount.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-sm text-right text-emerald-400">₹{customer.paid_amount.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-sm text-right text-red-400">₹{customer.dues.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* By Driver */}
+        <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">By Driver (79% Commission)</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Driver</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Transactions</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Total Amount</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Driver Commission</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Dues</th>
+                </tr>
+              </thead>
+              <tbody>
+                {by_driver.map((driver, index) => (
+                  <tr key={index} className="border-b border-slate-800 hover:bg-slate-700/30">
+                    <td className="py-3 px-4 text-sm text-white">{driver.driver_name}</td>
+                    <td className="py-3 px-4 text-sm text-right text-slate-300">{driver.transaction_count}</td>
+                    <td className="py-3 px-4 text-sm text-right text-white">₹{driver.total_amount.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-sm text-right text-emerald-400 font-semibold">₹{driver.driver_commission.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-sm text-right text-red-400">₹{driver.dues.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* By Dispatcher */}
+        <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">By Dispatcher (18% Commission)</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Dispatcher ID</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Transactions</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Total Amount</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Dispatcher Commission</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Dues</th>
+                </tr>
+              </thead>
+              <tbody>
+                {by_dispatcher.map((dispatcher, index) => (
+                  <tr key={index} className="border-b border-slate-800 hover:bg-slate-700/30">
+                    <td className="py-3 px-4 text-sm text-white">Dispatcher #{dispatcher.dispatcher_id}</td>
+                    <td className="py-3 px-4 text-sm text-right text-slate-300">{dispatcher.transaction_count}</td>
+                    <td className="py-3 px-4 text-sm text-right text-white">₹{dispatcher.total_amount.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-sm text-right text-blue-400 font-semibold">₹{dispatcher.dispatcher_commission.toLocaleString()}</td>
+                    <td className="py-3 px-4 text-sm text-right text-red-400">₹{dispatcher.dues.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Admin & Super Admin Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6">
+            <h3 className="text-lg font-semibold text-white mb-3">Admin Commission (2%)</h3>
+            <p className="text-3xl font-bold text-amber-400">₹{by_admin.admin_commission.toLocaleString()}</p>
+            <p className="text-sm text-slate-400 mt-2">From total: ₹{by_admin.total_amount.toLocaleString()}</p>
+          </div>
+          <div className="bg-purple-500/10 border border-purple-500/30 rounded-2xl p-6">
+            <h3 className="text-lg font-semibold text-white mb-3">Super Admin Commission (1%)</h3>
+            <p className="text-3xl font-bold text-purple-400">₹{by_super_admin.super_admin_commission.toLocaleString()}</p>
+            <p className="text-sm text-slate-400 mt-2">From total: ₹{by_super_admin.total_amount.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* All Transactions */}
+        <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">All Transactions</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-700">
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Transaction #</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Customer</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">Driver</th>
+                  <th className="text-center py-3 px-4 text-sm font-medium text-slate-400">Status</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">Amount</th>
+                  <th className="text-center py-3 px-4 text-sm font-medium text-slate-400">Commission</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.slice(0, 50).map((transaction, index) => (
+                  <React.Fragment key={index}>
+                    <tr className="border-b border-slate-800 hover:bg-slate-700/30">
+                      <td className="py-3 px-4 text-sm text-blue-400">{transaction.transaction_number}</td>
+                      <td className="py-3 px-4 text-sm text-white">{transaction.customer_name}</td>
+                      <td className="py-3 px-4 text-sm text-slate-300">{transaction.driver_name}</td>
+                      <td className="py-3 px-4 text-center">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          transaction.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300' :
+                          transaction.status === 'CANCELLED' ? 'bg-red-500/20 text-red-300' :
+                          'bg-amber-500/20 text-amber-300'
+                        }`}>
+                          {transaction.status}
+                        </span>
+                        {transaction.is_paid && (
+                          <span className="ml-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-500/20 text-emerald-300">
+                            PAID
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-right text-white font-medium">
+                        ₹{transaction.total_amount.toLocaleString()}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          onClick={() => setExpandedTransaction(expandedTransaction === index ? null : index)}
+                          className="text-purple-400 hover:text-purple-300 text-sm font-medium"
+                        >
+                          {expandedTransaction === index ? 'Hide' : 'View'}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedTransaction === index && (
+                      <tr>
+                        <td colSpan="6" className="px-4 py-0">
+                          <div className="bg-slate-900/50 rounded-xl p-4 mb-2">
+                            <h4 className="text-sm font-semibold text-white mb-3">Commission Breakdown</h4>
+                            <div className="grid grid-cols-4 gap-3">
+                              <div className="bg-emerald-500/10 rounded-lg p-3 border border-emerald-500/30">
+                                <p className="text-xs text-emerald-300 mb-1">Driver (79%)</p>
+                                <p className="text-lg font-bold text-white">
+                                  ₹{transaction.commission_breakdown.driver_commission.toLocaleString()}
+                                </p>
+                              </div>
+                              <div className="bg-blue-500/10 rounded-lg p-3 border border-blue-500/30">
+                                <p className="text-xs text-blue-300 mb-1">Dispatcher (18%)</p>
+                                <p className="text-lg font-bold text-white">
+                                  ₹{transaction.commission_breakdown.dispatcher_commission.toLocaleString()}
+                                </p>
+                              </div>
+                              <div className="bg-amber-500/10 rounded-lg p-3 border border-amber-500/30">
+                                <p className="text-xs text-amber-300 mb-1">Admin (2%)</p>
+                                <p className="text-lg font-bold text-white">
+                                  ₹{transaction.commission_breakdown.admin_commission.toLocaleString()}
+                                </p>
+                              </div>
+                              <div className="bg-purple-500/10 rounded-lg p-3 border border-purple-500/30">
+                                <p className="text-xs text-purple-300 mb-1">Super Admin (1%)</p>
+                                <p className="text-lg font-bold text-white">
+                                  ₹{transaction.commission_breakdown.super_admin_commission.toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderPaymentReleaseReport = () => {
     if (!reportData || reportType !== 'payment-release') return null;
 
@@ -514,6 +780,7 @@ const AnalyticsDashboard = ({ api }) => {
       ) : (
         <>
           {renderAnalyticsSummary()}
+          {renderTransactionReport()}
           {renderCustomerReport()}
           {renderDriverReport()}
           {renderPaymentReleaseReport()}

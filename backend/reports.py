@@ -20,6 +20,15 @@ from models import (
 from pydantic import BaseModel
 
 
+# Commission rates configuration
+COMMISSION_RATES = {
+    'SUPER_ADMIN': 0.01,  # 1%
+    'ADMIN': 0.02,        # 2%
+    'DISPATCHER': 0.18,   # 18%
+    'DRIVER': 0.79,       # 79%
+}
+
+
 class DateRangeFilter(BaseModel):
     """Date range filter options"""
     range_type: str  # '1day', '3days', '7days', '14days', '1month', '3months', '6months', '1year', '2years', etc.
@@ -379,4 +388,177 @@ def generate_payment_release_report(db: Session, filters: ReportFilters):
             }
             for t in paid_trips
         ]
+    }
+
+
+def calculate_commission_breakdown(amount: float):
+    """Calculate commission breakdown for all roles"""
+    return {
+        'total_amount': round(amount, 2),
+        'super_admin_commission': round(amount * COMMISSION_RATES['SUPER_ADMIN'], 2),
+        'admin_commission': round(amount * COMMISSION_RATES['ADMIN'], 2),
+        'dispatcher_commission': round(amount * COMMISSION_RATES['DISPATCHER'], 2),
+        'driver_commission': round(amount * COMMISSION_RATES['DRIVER'], 2),
+        'commission_rates': {
+            'super_admin': f"{COMMISSION_RATES['SUPER_ADMIN'] * 100}%",
+            'admin': f"{COMMISSION_RATES['ADMIN'] * 100}%",
+            'dispatcher': f"{COMMISSION_RATES['DISPATCHER'] * 100}%",
+            'driver': f"{COMMISSION_RATES['DRIVER'] * 100}%",
+        }
+    }
+
+
+def generate_transaction_report(db: Session, filters: ReportFilters):
+    """Generate comprehensive transaction-based report with commission breakdown"""
+    start_date, end_date = get_date_range(
+        filters.date_range.range_type,
+        filters.date_range.start_date,
+        filters.date_range.end_date
+    )
+    
+    # Get all transactions
+    query = db.query(RideTransaction).filter(
+        RideTransaction.created_at.between(start_date, end_date)
+    )
+    
+    if filters.tenant_id:
+        query = query.filter(RideTransaction.tenant_id == filters.tenant_id)
+    
+    transactions = query.order_by(RideTransaction.created_at.desc()).all()
+    
+    # Calculate totals
+    total_payment = sum(float(t.total_amount or 0) for t in transactions)
+    total_paid = sum(float(t.total_amount or 0) for t in transactions if t.is_paid)
+    total_dues = sum(float(t.total_amount or 0) for t in transactions if not t.is_paid and t.status == 'COMPLETED')
+    
+    # Calculate commission breakdown
+    commission_breakdown = calculate_commission_breakdown(total_payment)
+    paid_commission_breakdown = calculate_commission_breakdown(total_paid)
+    
+    # Group by customer
+    customer_totals = {}
+    for t in transactions:
+        if t.customer_id not in customer_totals:
+            customer_totals[t.customer_id] = {
+                'customer_id': t.customer_id,
+                'customer_name': t.customer_name,
+                'total_amount': 0,
+                'paid_amount': 0,
+                'dues': 0,
+                'transaction_count': 0,
+            }
+        customer_totals[t.customer_id]['total_amount'] += float(t.total_amount or 0)
+        customer_totals[t.customer_id]['transaction_count'] += 1
+        if t.is_paid:
+            customer_totals[t.customer_id]['paid_amount'] += float(t.total_amount or 0)
+        elif t.status == 'COMPLETED':
+            customer_totals[t.customer_id]['dues'] += float(t.total_amount or 0)
+    
+    # Group by driver
+    driver_totals = {}
+    for t in transactions:
+        if t.driver_id and t.driver_id not in driver_totals:
+            driver_totals[t.driver_id] = {
+                'driver_id': t.driver_id,
+                'driver_name': t.driver_name,
+                'total_amount': 0,
+                'paid_amount': 0,
+                'dues': 0,
+                'transaction_count': 0,
+                'driver_commission': 0,
+            }
+        if t.driver_id:
+            driver_totals[t.driver_id]['total_amount'] += float(t.total_amount or 0)
+            driver_totals[t.driver_id]['transaction_count'] += 1
+            driver_totals[t.driver_id]['driver_commission'] += float(t.total_amount or 0) * COMMISSION_RATES['DRIVER']
+            if t.is_paid:
+                driver_totals[t.driver_id]['paid_amount'] += float(t.total_amount or 0)
+            elif t.status == 'COMPLETED':
+                driver_totals[t.driver_id]['dues'] += float(t.total_amount or 0)
+    
+    # Group by dispatcher
+    dispatcher_totals = {}
+    for t in transactions:
+        if t.dispatcher_id and t.dispatcher_id not in dispatcher_totals:
+            dispatcher_totals[t.dispatcher_id] = {
+                'dispatcher_id': t.dispatcher_id,
+                'total_amount': 0,
+                'paid_amount': 0,
+                'dues': 0,
+                'transaction_count': 0,
+                'dispatcher_commission': 0,
+            }
+        if t.dispatcher_id:
+            dispatcher_totals[t.dispatcher_id]['total_amount'] += float(t.total_amount or 0)
+            dispatcher_totals[t.dispatcher_id]['transaction_count'] += 1
+            dispatcher_totals[t.dispatcher_id]['dispatcher_commission'] += float(t.total_amount or 0) * COMMISSION_RATES['DISPATCHER']
+            if t.is_paid:
+                dispatcher_totals[t.dispatcher_id]['paid_amount'] += float(t.total_amount or 0)
+            elif t.status == 'COMPLETED':
+                dispatcher_totals[t.dispatcher_id]['dues'] += float(t.total_amount or 0)
+    
+    # Build transaction details
+    transaction_details = []
+    for t in transactions:
+        amount = float(t.total_amount or 0)
+        trans_commission = calculate_commission_breakdown(amount)
+        
+        transaction_details.append({
+            'id': t.id,
+            'transaction_number': t.transaction_number,
+            'customer_id': t.customer_id,
+            'customer_name': t.customer_name,
+            'driver_id': t.driver_id,
+            'driver_name': t.driver_name,
+            'dispatcher_id': t.dispatcher_id,
+            'status': t.status,
+            'is_paid': t.is_paid,
+            'total_amount': amount,
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+            'pickup_location': t.pickup_location,
+            'destination_location': t.destination_location,
+            'commission_breakdown': trans_commission,
+        })
+    
+    return {
+        'period': {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+        },
+        'summary': {
+            'total_transactions': len(transactions),
+            'total_payment': round(total_payment, 2),
+            'total_paid': round(total_paid, 2),
+            'total_dues': round(total_dues, 2),
+            'commission_breakdown': commission_breakdown,
+            'paid_commission_breakdown': paid_commission_breakdown,
+        },
+        'by_customer': list(customer_totals.values()),
+        'by_driver': [
+            {
+                **driver,
+                'driver_commission': round(driver['driver_commission'], 2),
+                'driver_commission_percentage': f"{COMMISSION_RATES['DRIVER'] * 100}%"
+            }
+            for driver in driver_totals.values()
+        ],
+        'by_dispatcher': [
+            {
+                **dispatcher,
+                'dispatcher_commission': round(dispatcher['dispatcher_commission'], 2),
+                'dispatcher_commission_percentage': f"{COMMISSION_RATES['DISPATCHER'] * 100}%"
+            }
+            for dispatcher in dispatcher_totals.values()
+        ],
+        'by_admin': {
+            'total_amount': round(total_payment, 2),
+            'admin_commission': round(total_payment * COMMISSION_RATES['ADMIN'], 2),
+            'admin_commission_percentage': f"{COMMISSION_RATES['ADMIN'] * 100}%",
+        },
+        'by_super_admin': {
+            'total_amount': round(total_payment, 2),
+            'super_admin_commission': round(total_payment * COMMISSION_RATES['SUPER_ADMIN'], 2),
+            'super_admin_commission_percentage': f"{COMMISSION_RATES['SUPER_ADMIN'] * 100}%",
+        },
+        'transactions': transaction_details,
     }

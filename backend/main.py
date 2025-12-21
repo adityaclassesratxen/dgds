@@ -88,6 +88,7 @@ from reports import (
     generate_driver_report,
     generate_vehicle_report,
     generate_payment_release_report,
+    generate_transaction_report,
     ReportFilters,
     DateRangeFilter
 )
@@ -2551,6 +2552,22 @@ async def get_payment_release_report(
         filters.tenant_id = tenant_filter
     
     return generate_payment_release_report(db, filters)
+
+
+@app.post("/api/reports/by-transaction")
+@limiter.limit("20/minute")
+async def get_transaction_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate comprehensive transaction-based report with commission breakdown"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_transaction_report(db, filters)
 
 
 if __name__ == "__main__":
