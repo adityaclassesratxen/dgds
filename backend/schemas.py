@@ -297,3 +297,137 @@ class ErrorChatMessageResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# Dispatcher Schemas
+class DispatcherCreate(BaseModel):
+    name: str
+    contact_number: str
+    email: str
+    user_id: Optional[int] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class DispatcherResponse(BaseModel):
+    id: int
+    name: str
+    contact_number: str
+    email: str
+    user_id: Optional[int]
+    status: str
+    total_bookings: int
+    created_at: datetime
+    tenant_id: Optional[int]
+    
+    class Config:
+        from_attributes = True
+
+
+# Vehicle Schemas
+class CustomerVehicleCreate(BaseModel):
+    customer_id: int
+    make: str
+    model: str
+    year: int
+    color: Optional[str]
+    license_plate: Optional[str]
+    vin: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
+class CustomerVehicleResponse(BaseModel):
+    id: int
+    customer_id: int
+    make: str
+    model: str
+    year: int
+    color: Optional[str]
+    license_plate: Optional[str]
+    vin: Optional[str]
+    created_at: datetime
+    tenant_id: Optional[int]
+    
+    class Config:
+        from_attributes = True
+
+
+# Transaction Schemas
+class RideTransactionCreate(BaseModel):
+    customer_id: int
+    driver_id: int
+    vehicle_id: int
+    dispatcher_id: int
+    pickup_location: str
+    destination_location: str
+    return_location: Optional[str]
+    ride_duration_hours: int
+    payment_method: PaymentMethod
+    total_amount: Decimal
+    driver_share: Decimal
+    admin_share: Decimal
+    dispatcher_share: Decimal
+    super_admin_share: Decimal = Decimal('0')
+    
+    class Config:
+        from_attributes = True
+
+
+class RideTransactionResponse(BaseModel):
+    id: int
+    transaction_number: str
+    friendly_booking_id: Optional[str]
+    customer_id: int
+    driver_id: int
+    vehicle_id: int
+    dispatcher_id: int
+    pickup_location: str
+    destination_location: str
+    return_location: Optional[str]
+    ride_duration_hours: int
+    payment_method: PaymentMethod
+    total_amount: Decimal
+    driver_share: Decimal
+    admin_share: Decimal
+    dispatcher_share: Decimal
+    super_admin_share: Decimal
+    status: TransactionStatus
+    is_paid: bool
+    paid_amount: Decimal
+    created_at: datetime
+    updated_at: datetime
+    tenant_id: Optional[int]
+    
+    class Config:
+        from_attributes = True
+
+
+# Payment Transaction Schemas
+class PaymentTransactionCreate(BaseModel):
+    transaction_id: int
+    payer_type: PaymentPayerType
+    amount: Decimal
+    payment_method: PaymentMethod
+    status: PaymentStatus
+    transaction_reference: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
+class PaymentTransactionResponse(BaseModel):
+    id: int
+    transaction_id: int
+    payer_type: PaymentPayerType
+    amount: Decimal
+    payment_method: PaymentMethod
+    status: PaymentStatus
+    transaction_reference: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
