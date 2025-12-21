@@ -61,8 +61,7 @@ from schemas import (
     PaymentScreenshotCreate,
     PaymentScreenshotResponse,
     ErrorChatMessageCreate,
-    ErrorChatMessageResponse,
-    Tenant
+    ErrorChatMessageResponse
 )
 from auth import (
     get_password_hash,
