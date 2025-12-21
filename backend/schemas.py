@@ -4,7 +4,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from models import PaymentMethod, TransactionStatus
+from models import PaymentMethod, TransactionStatus, PaymentPayerType, PaymentStatus
 
 
 class SavedPaymentMethodCreate(BaseModel):
