@@ -2008,6 +2008,23 @@ async def register(request: Request, user_data: UserRegister, db: Session = Depe
     if not has_special:
         raise HTTPException(status_code=400, detail="Password must contain at least one special character (@$!%*?&)")
     
+    # Assign default tenant for non-Super Admin users
+    default_tenant_id = None
+    if role != UserRole.SUPER_ADMIN:
+        default_tenant = db.query(Tenant).filter(Tenant.code == "DGDS_CLONE").first()
+        if not default_tenant:
+            # Create default tenant if it doesn't exist
+            default_tenant = Tenant(
+                name="DGDS Clone",
+                code="DGDS_CLONE",
+                description="Default tenant for DGDS Clone application",
+                is_active=True,
+            )
+            db.add(default_tenant)
+            db.commit()
+            db.refresh(default_tenant)
+        default_tenant_id = default_tenant.id
+
     # Create user
     try:
         hashed_password = get_password_hash(user_data.password)
@@ -2015,6 +2032,7 @@ async def register(request: Request, user_data: UserRegister, db: Session = Depe
             email=user_data.email,
             password_hash=hashed_password,
             role=role,
+            tenant_id=default_tenant_id,
             customer_id=user_data.customer_id,
             driver_id=user_data.driver_id,
             dispatcher_id=user_data.dispatcher_id,
@@ -2063,6 +2081,13 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
         expires_delta=access_token_expires
     )
     
+    # Get tenant info for response
+    tenant_info = None
+    if user.tenant_id:
+        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+        if tenant:
+            tenant_info = {"id": tenant.id, "name": tenant.name, "code": tenant.code}
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -2073,6 +2098,8 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
             "role": user.role.value,
             "is_active": user.is_active,
             "is_verified": user.is_verified,
+            "tenant_id": user.tenant_id,
+            "tenant": tenant_info,
         }
     }
 
@@ -2174,6 +2201,13 @@ async def quick_login(
         expires_delta=access_token_expires
     )
     
+    # Get tenant info for response
+    tenant_info = None
+    if user.tenant_id:
+        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+        if tenant:
+            tenant_info = {"id": tenant.id, "name": tenant.name, "code": tenant.code}
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -2184,6 +2218,8 @@ async def quick_login(
             "role": user.role.value,
             "is_active": user.is_active,
             "is_verified": user.is_verified,
+            "tenant_id": user.tenant_id,
+            "tenant": tenant_info,
         },
         "message": f"Logged in as test {user_role.value} account"
     }

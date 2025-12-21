@@ -53,12 +53,17 @@ const api = axios.create({
   },
 });
 
-// Add request interceptor to include auth token
+// Add request interceptor to include auth token and tenant context
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Super Admin can switch tenant context
+    const activeTenantId = localStorage.getItem('active_tenant_id');
+    if (activeTenantId) {
+      config.headers['X-Tenant-Id'] = activeTenantId;
     }
     return config;
   },
@@ -235,6 +240,11 @@ function App() {
   const [tenantForm, setTenantForm] = useState({ name: '', code: '', description: '' });
   const [showTenantResetModal, setShowTenantResetModal] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState(null);
+  const [activeTenant, setActiveTenant] = useState(() => {
+    const stored = localStorage.getItem('active_tenant');
+    return stored ? JSON.parse(stored) : null;
+  });
+  const [showTenantPicker, setShowTenantPicker] = useState(false);
   
   // Landing page state
   const [showLanding, setShowLanding] = useState(!isAuthenticated);
@@ -1473,6 +1483,26 @@ function App() {
         {/* User Info & Logout */}
         {currentUser && (
           <div className="border-t border-slate-800 pt-4 mt-auto">
+            {/* Active Tenant Display */}
+            <div className="rounded-xl bg-slate-800/50 p-3 mb-3">
+              <p className="text-xs text-slate-400 mb-1">Active Tenant</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-emerald-300 truncate">
+                  {activeTenant?.name || currentUser?.tenant?.name || 'DGDS Clone'}
+                </p>
+                {currentUser.role === 'SUPER_ADMIN' && (
+                  <button
+                    onClick={() => setShowTenantPicker(true)}
+                    className="text-xs text-purple-300 hover:text-purple-200 underline"
+                  >
+                    Switch
+                  </button>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                ID: {activeTenant?.id || currentUser?.tenant?.id || currentUser?.tenant_id || 'N/A'}
+              </p>
+            </div>
             <div className="rounded-xl bg-slate-800/50 p-3 mb-3">
               <p className="text-xs text-slate-400 mb-1">Logged in as</p>
               <p className="text-sm font-semibold text-white truncate">{currentUser.email}</p>
@@ -5191,6 +5221,69 @@ function App() {
                 Create Tenant
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tenant Picker Modal for Super Admin */}
+      {showTenantPicker && currentUser?.role === 'SUPER_ADMIN' && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-white">Switch Tenant Context</h3>
+              <button
+                onClick={() => setShowTenantPicker(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-400 mb-4">
+              Select a tenant to work within. All data operations will be scoped to the selected tenant.
+            </p>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {/* Option to see all data */}
+              <button
+                onClick={() => {
+                  setActiveTenant(null);
+                  localStorage.removeItem('active_tenant');
+                  localStorage.removeItem('active_tenant_id');
+                  setShowTenantPicker(false);
+                  window.location.reload();
+                }}
+                className={`w-full text-left px-4 py-3 rounded-xl border transition ${
+                  !activeTenant
+                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-200'
+                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <p className="font-semibold">All Tenants (Global View)</p>
+                <p className="text-xs text-slate-500">See data across all tenants</p>
+              </button>
+              {tenants.map((tenant) => (
+                <button
+                  key={tenant.id}
+                  onClick={() => {
+                    setActiveTenant(tenant);
+                    localStorage.setItem('active_tenant', JSON.stringify(tenant));
+                    localStorage.setItem('active_tenant_id', String(tenant.id));
+                    setShowTenantPicker(false);
+                    window.location.reload();
+                  }}
+                  className={`w-full text-left px-4 py-3 rounded-xl border transition ${
+                    activeTenant?.id === tenant.id
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <p className="font-semibold">{tenant.name}</p>
+                  <p className="text-xs text-slate-500">Code: {tenant.code} · ID: {tenant.id}</p>
+                </button>
+              ))}
+            </div>
+            {tenants.length === 0 && (
+              <p className="text-center text-slate-500 py-4">No tenants found. Create one first.</p>
+            )}
           </div>
         </div>
       )}

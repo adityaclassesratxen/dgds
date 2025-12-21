@@ -2,22 +2,30 @@
 Tenant filtering utilities for multi-tenant data isolation
 """
 from typing import Optional
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from auth import get_current_user
 from models import User, UserRole
 
 
 async def get_tenant_filter(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
 ) -> Optional[int]:
     """
-    Get tenant_id for filtering queries based on current user
-    Returns None for Super Admin (can see all data)
-    Returns tenant_id for other roles (can only see their tenant's data)
+    Get tenant_id for filtering queries based on current user.
+    Super Admin can override via X-Tenant-Id header to work within a specific tenant.
+    Returns None only when Super Admin has no header set (sees all data).
+    Returns tenant_id for other roles (can only see their tenant's data).
     """
-    # Super Admin can see all data
+    # Super Admin can switch tenant context via header
     if current_user.role == UserRole.SUPER_ADMIN:
+        if x_tenant_id:
+            try:
+                return int(x_tenant_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid X-Tenant-Id header")
+        # No header means see all data
         return None
     
     # For other roles, return their tenant_id
