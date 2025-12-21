@@ -7,8 +7,50 @@ Run this once after deploying the tenant-aware backend.
 import os
 import sys
 from sqlalchemy import create_engine, text
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from models import User, Tenant, Base, UserRole
+
+# Define models inline to avoid import issues
+Base = declarative_base()
+
+from sqlalchemy import Column, Integer, String, Boolean, Enum, ForeignKey, DateTime, Text
+from sqlalchemy.orm import relationship
+import enum
+from datetime import datetime
+
+class UserRole(enum.Enum):
+    SUPER_ADMIN = "SUPER_ADMIN"
+    ADMIN = "ADMIN"
+    CUSTOMER = "CUSTOMER"
+    DRIVER = "DRIVER"
+    DISPATCHER = "DISPATCHER"
+    TENANT_ADMIN = "TENANT_ADMIN"
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(Enum(UserRole), nullable=False)
+    is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
+    tenant_id = Column(Integer, nullable=True)
+    customer_id = Column(Integer, nullable=True)
+    driver_id = Column(Integer, nullable=True)
+    dispatcher_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    code = Column(String, unique=True, nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 def run_migration():
     # Get database URL from environment
