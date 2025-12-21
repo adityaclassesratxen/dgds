@@ -82,6 +82,15 @@ from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from tenant_filter import get_tenant_filter, apply_tenant_filter, check_tenant_access
+from reports import (
+    generate_analytics_report,
+    generate_customer_report,
+    generate_driver_report,
+    generate_vehicle_report,
+    generate_payment_release_report,
+    ReportFilters,
+    DateRangeFilter
+)
 from schemas import (
     CustomerCreate,
     CustomerResponse,
@@ -2460,6 +2469,88 @@ async def get_error_chat_messages(
     ).order_by(ErrorChatMessage.timestamp.asc()).all()
     
     return messages
+
+
+# Reporting and Analytics Endpoints
+@app.post("/api/reports/analytics")
+@limiter.limit("20/minute")
+async def get_analytics_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate comprehensive analytics report"""
+    # Apply tenant filter
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_analytics_report(db, filters)
+
+
+@app.post("/api/reports/by-customer")
+@limiter.limit("20/minute")
+async def get_customer_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate report grouped by customer"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_customer_report(db, filters)
+
+
+@app.post("/api/reports/by-driver")
+@limiter.limit("20/minute")
+async def get_driver_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate report grouped by driver"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_driver_report(db, filters)
+
+
+@app.post("/api/reports/by-vehicle")
+@limiter.limit("20/minute")
+async def get_vehicle_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate report grouped by vehicle"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_vehicle_report(db, filters)
+
+
+@app.post("/api/reports/payment-release")
+@limiter.limit("20/minute")
+async def get_payment_release_report(
+    request: Request,
+    filters: ReportFilters,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate payment release tracking report"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None:
+        filters.tenant_id = tenant_filter
+    
+    return generate_payment_release_report(db, filters)
 
 
 if __name__ == "__main__":
