@@ -2326,6 +2326,7 @@ async def health_check(db: Session = Depends(get_db)):
 @app.post("/api/trips/{trip_id}/payment-screenshot", response_model=PaymentScreenshotResponse)
 @limiter.limit("5/minute")
 async def upload_payment_screenshot(
+    request: Request,
     trip_id: int,
     screenshot: UploadFile = File(...),
     payment_date: str = Form(...),
@@ -2421,6 +2422,7 @@ async def get_payment_screenshot(
 @app.post("/api/trips/{trip_id}/error-chat", response_model=ErrorChatMessageResponse)
 @limiter.limit("10/minute")
 async def send_error_chat_message(
+    request: Request,
     trip_id: int,
     message_data: ErrorChatMessageCreate,
     db: Session = Depends(get_db),
