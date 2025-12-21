@@ -21,6 +21,8 @@ import {
   Eye,
   EyeOff,
   Database,
+  X,
+  Info,
 } from 'lucide-react';
 
 // API Configuration - uses environment variables with smart fallbacks
@@ -239,6 +241,105 @@ function App() {
   const [isDbSeeded, setIsDbSeeded] = useState(false);
   const [seedLoading, setSeedLoading] = useState(false);
   const [seedTenantName, setSeedTenantName] = useState('DGDS Clone');
+  const [dialog, setDialog] = useState(null);
+
+  const closeDialog = () => setDialog(null);
+
+  const openDialog = ({
+    title,
+    message,
+    variant = 'info',
+    actions,
+  }) => {
+    setDialog({
+      title,
+      message,
+      variant,
+      actions:
+        actions && actions.length
+          ? actions
+          : [
+              {
+                label: 'OK',
+                onClick: closeDialog,
+                variant: 'primary',
+              },
+            ],
+    });
+  };
+
+  const renderDialog = () => {
+    if (!dialog) return null;
+    const variant = dialog.variant || 'info';
+    const variantStyles = {
+      success: {
+        header: 'text-emerald-300',
+        badge: 'bg-emerald-500/10 border-emerald-500/30',
+      },
+      error: {
+        header: 'text-red-300',
+        badge: 'bg-red-500/10 border-red-500/30',
+      },
+      warning: {
+        header: 'text-amber-300',
+        badge: 'bg-amber-500/10 border-amber-500/30',
+      },
+      info: {
+        header: 'text-blue-300',
+        badge: 'bg-blue-500/10 border-blue-500/30',
+      },
+    };
+    const variantIcons = {
+      success: CheckCircle2,
+      error: AlertCircle,
+      warning: AlertCircle,
+      info: Info,
+    };
+    const actionClassMap = {
+      primary: 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:from-purple-600 hover:to-blue-600',
+      secondary: 'bg-slate-800 text-slate-100 hover:bg-slate-700',
+      danger: 'bg-red-600 text-white hover:bg-red-500',
+      ghost: 'bg-transparent border border-slate-700 text-slate-300 hover:bg-slate-800',
+    };
+    const IconComponent = variantIcons[variant] || Info;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm px-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+          <div className={`flex items-center justify-between ${variantStyles[variant]?.header || 'text-slate-200'}`}>
+            <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest">
+              <IconComponent className="h-5 w-5" />
+              {dialog.title}
+            </div>
+            <button
+              onClick={closeDialog}
+              className="rounded-full border border-slate-800 p-1 text-slate-400 hover:text-white hover:border-slate-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div
+            className={`mt-4 rounded-xl border p-4 text-sm leading-relaxed ${variantStyles[variant]?.badge || 'border-slate-800 text-slate-300'}`}
+          >
+            <p className="text-slate-200 whitespace-pre-line">{dialog.message}</p>
+          </div>
+          <div className="mt-6 flex flex-wrap gap-3 justify-end">
+            {dialog.actions.map((action, index) => (
+              <button
+                key={`dialog-action-${index}`}
+                onClick={() => action.onClick ? action.onClick() : closeDialog()}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${actionClassMap[action.variant || 'primary']}`}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const dialogOverlay = renderDialog();
 
   // Check if database is seeded on mount
   useEffect(() => {
@@ -265,11 +366,28 @@ function App() {
       const response = await api.post('/api/seed-database', null, {
         params: { tenant_name: seedTenantName }
       });
-      alert(`✅ ${response.data.message}\n\nYou can now login with the quick login buttons!`);
-      setShowLanding(false);
-      window.location.reload(); // Reload to refresh the app
+      openDialog({
+        title: 'Database Ready',
+        message: `${response.data.message}\n\nYou can now log in with the quick login buttons.`,
+        variant: 'success',
+        actions: [
+          {
+            label: 'Enter App',
+            variant: 'primary',
+            onClick: () => {
+              closeDialog();
+              setShowLanding(false);
+              window.location.reload();
+            },
+          },
+        ],
+      });
     } catch (error) {
-      alert(`❌ Error: ${error.response?.data?.detail || 'Failed to seed database'}`);
+      openDialog({
+        title: 'Seeding failed',
+        message: error.response?.data?.detail || 'Failed to seed database',
+        variant: 'error',
+      });
     } finally {
       setSeedLoading(false);
     }
@@ -1044,6 +1162,7 @@ function App() {
             )}
           </div>
         </div>
+        {dialogOverlay}
       </div>
     );
   }
@@ -5124,6 +5243,7 @@ function App() {
           </div>
         </div>
       )}
+      {dialogOverlay}
     </div>
   );
 }
