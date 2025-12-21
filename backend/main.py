@@ -92,6 +92,24 @@ from reports import (
     ReportFilters,
     DateRangeFilter
 )
+from export_import import (
+    export_customers_to_csv,
+    export_drivers_to_csv,
+    export_vehicles_to_csv,
+    export_dispatchers_to_csv,
+    export_trips_to_csv,
+    import_customers_from_csv,
+    import_drivers_from_csv,
+    import_vehicles_from_csv
+)
+from notifications import (
+    generate_friendly_booking_id,
+    format_email_booking_notification,
+    format_whatsapp_booking_notification,
+    format_driver_assignment_notification,
+    format_trip_completion_notification,
+    format_cancellation_notification
+)
 from schemas import (
     CustomerCreate,
     CustomerResponse,
@@ -2568,6 +2586,253 @@ async def get_transaction_report(
         filters.tenant_id = tenant_filter
     
     return generate_transaction_report(db, filters)
+
+
+# ============================================================================
+# EXPORT/IMPORT ENDPOINTS
+# ============================================================================
+
+@app.get("/api/export/customers")
+@limiter.limit("10/minute")
+async def export_customers(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Export customers to CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    csv_content = export_customers_to_csv(db, tenant_filter)
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=customers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+    )
+
+
+@app.get("/api/export/drivers")
+@limiter.limit("10/minute")
+async def export_drivers(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Export drivers to CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    csv_content = export_drivers_to_csv(db, tenant_filter)
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=drivers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+    )
+
+
+@app.get("/api/export/vehicles")
+@limiter.limit("10/minute")
+async def export_vehicles(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Export vehicles to CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    csv_content = export_vehicles_to_csv(db, tenant_filter)
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=vehicles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+    )
+
+
+@app.get("/api/export/dispatchers")
+@limiter.limit("10/minute")
+async def export_dispatchers(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Export dispatchers to CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    csv_content = export_dispatchers_to_csv(db, tenant_filter)
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=dispatchers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+    )
+
+
+@app.get("/api/export/trips")
+@limiter.limit("10/minute")
+async def export_trips(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Export trips/transactions to CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    csv_content = export_trips_to_csv(db, tenant_filter)
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=trips_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+    )
+
+
+@app.post("/api/import/customers")
+@limiter.limit("5/minute")
+async def import_customers(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Import customers from CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if not tenant_filter:
+        raise HTTPException(status_code=400, detail="Tenant ID required for import")
+    
+    content = await file.read()
+    csv_content = content.decode('utf-8')
+    
+    result = import_customers_from_csv(db, csv_content, tenant_filter)
+    return result
+
+
+@app.post("/api/import/drivers")
+@limiter.limit("5/minute")
+async def import_drivers(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Import drivers from CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if not tenant_filter:
+        raise HTTPException(status_code=400, detail="Tenant ID required for import")
+    
+    content = await file.read()
+    csv_content = content.decode('utf-8')
+    
+    result = import_drivers_from_csv(db, csv_content, tenant_filter)
+    return result
+
+
+@app.post("/api/import/vehicles")
+@limiter.limit("5/minute")
+async def import_vehicles(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Import vehicles from CSV"""
+    tenant_filter = await get_tenant_filter(current_user)
+    if not tenant_filter:
+        raise HTTPException(status_code=400, detail="Tenant ID required for import")
+    
+    content = await file.read()
+    csv_content = content.decode('utf-8')
+    
+    result = import_vehicles_from_csv(db, csv_content, tenant_filter)
+    return result
+
+
+# ============================================================================
+# BOOKING NOTIFICATION ENDPOINTS
+# ============================================================================
+
+@app.post("/api/notifications/booking-confirmation")
+@limiter.limit("30/minute")
+async def send_booking_confirmation(
+    request: Request,
+    booking_id: int,
+    notification_type: str = "both",  # email, whatsapp, or both
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Send booking confirmation notification"""
+    trip = db.query(RideTransaction).filter(RideTransaction.id == booking_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    # Generate friendly booking ID if not exists
+    if not trip.friendly_booking_id:
+        trip.friendly_booking_id = generate_friendly_booking_id()
+        db.commit()
+    
+    # Prepare booking data
+    booking_data = {
+        'friendly_booking_id': trip.friendly_booking_id,
+        'transaction_number': trip.transaction_number,
+        'status': trip.status,
+        'pickup_location': trip.pickup_location,
+        'destination_location': trip.destination_location,
+        'customer_name': trip.customer_name if hasattr(trip, 'customer_name') else trip.customer.name,
+        'customer_phone': trip.customer.phone if trip.customer else 'N/A',
+        'passenger_count': 1,
+        'vehicle_type': trip.vehicle_type if hasattr(trip, 'vehicle_type') else 'N/A',
+        'pickup_time': trip.pickup_time.strftime('%b %d, %Y, %I:%M %p') if trip.pickup_time else 'N/A',
+        'min_fare': float(trip.total_amount * 0.8) if trip.total_amount else 0,
+        'max_fare': float(trip.total_amount * 1.2) if trip.total_amount else 0,
+        'distance_km': trip.distance_km if hasattr(trip, 'distance_km') else 0,
+        'duration_minutes': trip.duration_minutes if hasattr(trip, 'duration_minutes') else 0,
+        'tracking_url': f"http://localhost:3000/customer/rides/{trip.id}"
+    }
+    
+    notifications = {}
+    if notification_type in ['email', 'both']:
+        notifications['email'] = format_email_booking_notification(booking_data)
+    if notification_type in ['whatsapp', 'both']:
+        notifications['whatsapp'] = format_whatsapp_booking_notification(booking_data)
+    
+    return {
+        'success': True,
+        'booking_id': trip.friendly_booking_id,
+        'notifications': notifications
+    }
+
+
+@app.post("/api/notifications/driver-assignment")
+@limiter.limit("30/minute")
+async def send_driver_assignment(
+    request: Request,
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Send driver assignment notification"""
+    trip = db.query(RideTransaction).filter(RideTransaction.id == booking_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    booking_data = {
+        'friendly_booking_id': trip.friendly_booking_id,
+        'customer_name': trip.customer.name if trip.customer else 'Customer',
+        'pickup_time': trip.pickup_time.strftime('%b %d, %Y, %I:%M %p') if trip.pickup_time else 'N/A',
+        'pickup_location': trip.pickup_location,
+        'tracking_url': f"http://localhost:3000/customer/rides/{trip.id}"
+    }
+    
+    driver_data = {
+        'name': trip.driver.name if trip.driver else 'N/A',
+        'phone': trip.driver.phone if trip.driver else 'N/A',
+        'vehicle_type': trip.driver.vehicle_type if trip.driver else 'N/A',
+        'vehicle_number': trip.driver.vehicle_number if trip.driver else 'N/A',
+        'rating': trip.driver.rating if trip.driver else 0
+    }
+    
+    notifications = format_driver_assignment_notification(booking_data, driver_data)
+    
+    return {
+        'success': True,
+        'booking_id': trip.friendly_booking_id,
+        'notifications': notifications
+    }
 
 
 if __name__ == "__main__":

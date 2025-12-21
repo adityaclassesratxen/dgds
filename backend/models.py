@@ -303,6 +303,7 @@ class RideTransaction(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     transaction_number = Column(String(50), unique=True, index=True)
+    friendly_booking_id = Column(String(50), unique=True, index=True, nullable=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
     driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=False)
     vehicle_id = Column(Integer, ForeignKey("customer_vehicles.id"), nullable=False)
