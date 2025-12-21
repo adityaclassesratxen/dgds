@@ -9,6 +9,7 @@ from sqlalchemy import (
     Numeric,
     Enum as SAEnum,
     Text,
+    LargeBinary,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -428,3 +429,55 @@ class SavedPaymentMethod(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="saved_payment_methods")
+
+
+class PaymentScreenshot(Base):
+    __tablename__ = "payment_screenshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    transaction_id = Column(
+        Integer, ForeignKey("ride_transactions.id", ondelete="CASCADE"), nullable=False
+    )
+    screenshot_data = Column(LargeBinary, nullable=False)  # Store image as binary
+    screenshot_url = Column(String(500), nullable=True)  # Optional: store cloud URL
+    file_name = Column(String(255), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    payment_date = Column(DateTime(timezone=True), nullable=False)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    verified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    transaction = relationship("RideTransaction")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+    verifier = relationship("User", foreign_keys=[verified_by])
+    tenant = relationship("Tenant")
+
+
+class ErrorChatMessage(Base):
+    __tablename__ = "error_chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    transaction_id = Column(
+        Integer, ForeignKey("ride_transactions.id", ondelete="CASCADE"), nullable=False
+    )
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    sender_type = Column(SAEnum(UserRole), nullable=False)  # CUSTOMER, DRIVER, DISPATCHER, etc.
+    message = Column(Text, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    is_read = Column(Boolean, default=False, nullable=False)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Foreign key relationships
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
+    
+    # Relationships
+    transaction = relationship("RideTransaction")
+    sender = relationship("User")
+    tenant = relationship("Tenant")

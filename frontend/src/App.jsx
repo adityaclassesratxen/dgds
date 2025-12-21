@@ -23,6 +23,10 @@ import {
   Database,
   X,
   Info,
+  Upload,
+  MessageSquare,
+  Clock,
+  FileImage,
 } from 'lucide-react';
 
 // API Configuration - uses environment variables with smart fallbacks
@@ -246,6 +250,16 @@ function App() {
   });
   const [showTenantPicker, setShowTenantPicker] = useState(false);
   
+  // Payment and error chat state
+  const [paymentScreenshots, setPaymentScreenshots] = useState({});
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedTripForPayment, setSelectedTripForPayment] = useState(null);
+  const [errorChatMessages, setErrorChatMessages] = useState({});
+  const [showErrorChat, setShowErrorChat] = useState(false);
+  const [selectedTripForChat, setSelectedTripForChat] = useState(null);
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  
   // Landing page state
   const [showLanding, setShowLanding] = useState(!isAuthenticated);
   const [isDbSeeded, setIsDbSeeded] = useState(false);
@@ -260,11 +274,15 @@ function App() {
     message,
     variant = 'info',
     actions,
+    persistent = false,
+    size = 'md',
   }) => {
     setDialog({
       title,
       message,
       variant,
+      persistent,
+      size,
       actions:
         actions && actions.length
           ? actions
@@ -281,22 +299,27 @@ function App() {
   const renderDialog = () => {
     if (!dialog) return null;
     const variant = dialog.variant || 'info';
+    const size = dialog.size || 'md';
     const variantStyles = {
       success: {
         header: 'text-emerald-300',
         badge: 'bg-emerald-500/10 border-emerald-500/30',
+        bg: 'bg-emerald-500/5',
       },
       error: {
         header: 'text-red-300',
         badge: 'bg-red-500/10 border-red-500/30',
+        bg: 'bg-red-500/5',
       },
       warning: {
         header: 'text-amber-300',
         badge: 'bg-amber-500/10 border-amber-500/30',
+        bg: 'bg-amber-500/5',
       },
       info: {
         header: 'text-blue-300',
         badge: 'bg-blue-500/10 border-blue-500/30',
+        bg: 'bg-blue-500/5',
       },
     };
     const variantIcons = {
@@ -306,39 +329,50 @@ function App() {
       info: Info,
     };
     const actionClassMap = {
-      primary: 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:from-purple-600 hover:to-blue-600',
-      secondary: 'bg-slate-800 text-slate-100 hover:bg-slate-700',
-      danger: 'bg-red-600 text-white hover:bg-red-500',
+      primary: 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:from-purple-600 hover:to-blue-600 shadow-lg',
+      secondary: 'bg-slate-800 text-slate-100 hover:bg-slate-700 border border-slate-700',
+      danger: 'bg-red-600 text-white hover:bg-red-500 shadow-lg',
       ghost: 'bg-transparent border border-slate-700 text-slate-300 hover:bg-slate-800',
+    };
+    const sizeClasses = {
+      sm: 'max-w-sm',
+      md: 'max-w-md',
+      lg: 'max-w-lg',
+      xl: 'max-w-xl',
+      full: 'max-w-4xl',
     };
     const IconComponent = variantIcons[variant] || Info;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm px-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
+        <div className={`w-full ${sizeClasses[size]} rounded-3xl border border-slate-800/50 bg-slate-900/95 p-8 shadow-2xl backdrop-blur-xl ${variantStyles[variant]?.bg || ''}`}>
           <div className={`flex items-center justify-between ${variantStyles[variant]?.header || 'text-slate-200'}`}>
-            <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest">
-              <IconComponent className="h-5 w-5" />
+            <div className="flex items-center gap-3 text-sm font-bold uppercase tracking-wider">
+              <div className={`rounded-xl p-2 ${variantStyles[variant]?.badge || 'border-slate-800'}`}>
+                <IconComponent className="h-5 w-5" />
+              </div>
               {dialog.title}
             </div>
-            <button
-              onClick={closeDialog}
-              className="rounded-full border border-slate-800 p-1 text-slate-400 hover:text-white hover:border-slate-600"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            {!dialog.persistent && (
+              <button
+                onClick={closeDialog}
+                className="rounded-xl border border-slate-800/50 p-2 text-slate-400 hover:text-white hover:border-slate-600 hover:bg-slate-800/50 transition-all"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            )}
           </div>
           <div
-            className={`mt-4 rounded-xl border p-4 text-sm leading-relaxed ${variantStyles[variant]?.badge || 'border-slate-800 text-slate-300'}`}
+            className={`mt-6 rounded-2xl border p-6 text-sm leading-relaxed ${variantStyles[variant]?.badge || 'border-slate-800/50 text-slate-300'}`}
           >
             <p className="text-slate-200 whitespace-pre-line">{dialog.message}</p>
           </div>
-          <div className="mt-6 flex flex-wrap gap-3 justify-end">
+          <div className="mt-8 flex flex-wrap gap-3 justify-end">
             {dialog.actions.map((action, index) => (
               <button
                 key={`dialog-action-${index}`}
                 onClick={() => action.onClick ? action.onClick() : closeDialog()}
-                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${actionClassMap[action.variant || 'primary']}`}
+                className={`rounded-xl px-6 py-3 text-sm font-bold transition-all transform hover:scale-105 ${actionClassMap[action.variant || 'primary']}`}
               >
                 {action.label}
               </button>
@@ -350,6 +384,76 @@ function App() {
   };
 
   const dialogOverlay = renderDialog();
+
+  // Payment screenshot upload handler
+  const handlePaymentScreenshotUpload = async (tripId, file) => {
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('screenshot', file);
+    formData.append('trip_id', tripId);
+    formData.append('payment_date', new Date().toISOString());
+    
+    try {
+      const response = await api.post(`/api/trips/${tripId}/payment-screenshot`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
+      setPaymentScreenshots(prev => ({
+        ...prev,
+        [tripId]: {
+          url: response.data.screenshot_url,
+          uploaded_at: response.data.uploaded_at,
+          payment_date: response.data.payment_date,
+        }
+      }));
+      
+      openDialog({
+        title: 'Payment Screenshot Uploaded',
+        message: 'Payment screenshot has been successfully attached to the trip.',
+        variant: 'success',
+        size: 'sm'
+      });
+    } catch (error) {
+      openDialog({
+        title: 'Upload Failed',
+        message: error.response?.data?.detail || 'Failed to upload payment screenshot',
+        variant: 'error',
+        size: 'sm'
+      });
+    }
+  };
+
+  // Error chat functionality
+  const sendErrorChatMessage = async (tripId, message) => {
+    if (!message.trim()) return;
+    
+    setChatLoading(true);
+    try {
+      const response = await api.post(`/api/trips/${tripId}/error-chat`, {
+        message: message.trim(),
+        timestamp: new Date().toISOString(),
+      });
+      
+      setErrorChatMessages(prev => ({
+        ...prev,
+        [tripId]: [...(prev[tripId] || []), response.data]
+      }));
+      
+      setChatMessage('');
+    } catch (error) {
+      openDialog({
+        title: 'Message Failed',
+        message: error.response?.data?.detail || 'Failed to send message',
+        variant: 'error',
+        size: 'sm'
+      });
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   // Check if database is seeded on mount
   useEffect(() => {
@@ -2159,13 +2263,61 @@ function App() {
                           {trip.pickup_location} → {trip.destination_location}
                         </p>
                       </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => setSelectedTrip(trip)}
-                          className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
-                        >
-                          Manage
-                        </button>
+                      <div className="flex flex-col gap-2">
+                        {/* Payment Screenshot Indicator */}
+                        {paymentScreenshots[trip.id] ? (
+                          <div className="flex items-center gap-2 text-xs text-emerald-300">
+                            <FileImage className="h-3 w-3" />
+                            <span>Payment verified</span>
+                          </div>
+                        ) : trip.status === 'COMPLETED' && !trip.is_paid ? (
+                          <div className="flex items-center gap-2 text-xs text-red-300">
+                            <AlertCircle className="h-3 w-3" />
+                            <span>Payment pending</span>
+                          </div>
+                        ) : null}
+                        
+                        {/* Action Buttons */}
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => setSelectedTrip(trip)}
+                            className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
+                          >
+                            Manage
+                          </button>
+                          
+                          {/* Payment Screenshot Upload */}
+                          {(trip.status === 'COMPLETED' || trip.status === 'REQUESTED') && (
+                            <button 
+                              onClick={() => {
+                                setSelectedTripForPayment(trip);
+                                setShowPaymentModal(true);
+                              }}
+                              className={`rounded-xl px-3 py-1 text-sm transition flex items-center gap-1 ${
+                                paymentScreenshots[trip.id] 
+                                  ? 'bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' 
+                                  : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+                              }`}
+                              title={paymentScreenshots[trip.id] ? "View payment screenshot" : "Upload payment screenshot"}
+                            >
+                              <Camera className="h-3 w-3" />
+                              {paymentScreenshots[trip.id] ? 'View' : 'Upload'}
+                            </button>
+                          )}
+                          
+                          {/* Error Chat */}
+                          <button 
+                            onClick={() => {
+                              setSelectedTripForChat(trip);
+                              setShowErrorChat(true);
+                            }}
+                            className="rounded-xl bg-red-500/10 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500/20 flex items-center gap-1"
+                            title="Report issue or error"
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                            Chat
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -5336,6 +5488,156 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Payment Screenshot Upload Modal */}
+      {showPaymentModal && selectedTripForPayment && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-white flex items-center gap-2">
+                <Upload className="h-5 w-5 text-emerald-400" />
+                Upload Payment Screenshot
+              </h3>
+              <button
+                onClick={() => {
+                  setShowPaymentModal(false);
+                  setSelectedTripForPayment(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-400 mb-4">
+              Attach a payment screenshot for trip #{selectedTripForPayment.id}
+            </p>
+            <div className="space-y-4">
+              <div className="border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:border-emerald-500 transition-colors">
+                <input
+                  type="file"
+                  id="payment-screenshot"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      handlePaymentScreenshotUpload(selectedTripForPayment.id, file);
+                      setShowPaymentModal(false);
+                      setSelectedTripForPayment(null);
+                    }
+                  }}
+                />
+                <label
+                  htmlFor="payment-screenshot"
+                  className="cursor-pointer flex flex-col items-center gap-2"
+                >
+                  <Camera className="h-12 w-12 text-slate-500" />
+                  <span className="text-slate-300 font-medium">Click to upload screenshot</span>
+                  <span className="text-xs text-slate-500">PNG, JPG, GIF up to 10MB</span>
+                </label>
+              </div>
+              {paymentScreenshots[selectedTripForPayment.id] && (
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+                  <p className="text-sm text-emerald-300 font-medium flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Screenshot uploaded successfully
+                  </p>
+                  <p className="text-xs text-emerald-200 mt-1">
+                    Uploaded: {new Date(paymentScreenshots[selectedTripForPayment.id].uploaded_at).toLocaleString()}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowPaymentModal(false);
+                  setSelectedTripForPayment(null);
+                }}
+                className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Chat Modal */}
+      {showErrorChat && selectedTripForChat && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-white flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-amber-400" />
+                Error Chat - Trip #{selectedTripForChat.id}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowErrorChat(false);
+                  setSelectedTripForChat(null);
+                  setChatMessage('');
+                }}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto mb-4 space-y-3 min-h-[200px] max-h-[400px]">
+              {errorChatMessages[selectedTripForChat.id]?.length > 0 ? (
+                errorChatMessages[selectedTripForChat.id].map((msg, index) => (
+                  <div key={index} className={`flex ${msg.sender_type === 'CUSTOMER' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${
+                      msg.sender_type === 'CUSTOMER' 
+                        ? 'bg-purple-500 text-white' 
+                        : 'bg-slate-700 text-slate-200'
+                    }`}>
+                      <p className="text-sm">{msg.message}</p>
+                      <p className="text-xs opacity-75 mt-1 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(msg.timestamp).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center text-slate-500 py-8">
+                  <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No messages yet. Start the conversation below.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Message Input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && !chatLoading && sendErrorChatMessage(selectedTripForChat.id, chatMessage)}
+                placeholder="Type your message..."
+                className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                disabled={chatLoading}
+              />
+              <button
+                onClick={() => sendErrorChatMessage(selectedTripForChat.id, chatMessage)}
+                disabled={chatLoading || !chatMessage.trim()}
+                className="px-6 py-3 rounded-xl bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+              >
+                {chatLoading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {dialogOverlay}
     </div>
   );

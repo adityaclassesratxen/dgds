@@ -10,11 +10,12 @@ import qrcode
 # Load environment variables from .env file
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import case
+from fastapi import Form
 from database import SessionLocal, engine, Base
 from models import (
     Customer,
@@ -28,6 +29,8 @@ from models import (
     SuperAdmin,
     RideTransaction,
     RideTransactionEvent,
+    PaymentScreenshot,
+    ErrorChatMessage,
     CustomerVehicle,
     PaymentTransaction,
     PaymentMethod,
@@ -35,6 +38,35 @@ from models import (
     PaymentStatus,
     User,
     UserRole,
+    Tenant
+)
+from schemas import (
+    CustomerCreate,
+    CustomerResponse,
+    CustomerUpdate,
+    DriverCreate,
+    DriverResponse,
+    DriverUpdate,
+    DispatcherCreate,
+    DispatcherResponse,
+    DispatcherUpdate,
+    RideTransactionCreate,
+    RideTransactionResponse,
+    RideTransactionUpdate,
+    CustomerVehicleCreate,
+    CustomerVehicleResponse,
+    CustomerVehicleUpdate,
+    PaymentTransactionCreate,
+    PaymentTransactionResponse,
+    UserRegister,
+    UserResponse,
+    UserLogin,
+    Token,
+    PasswordChange,
+    PaymentScreenshotCreate,
+    PaymentScreenshotResponse,
+    ErrorChatMessageCreate,
+    ErrorChatMessageResponse,
     Tenant
 )
 from auth import (
@@ -2266,6 +2298,168 @@ async def health_check(db: Session = Depends(get_db)):
             "status": "unhealthy",
             "database": str(e),
         }
+
+
+# Payment Screenshot Endpoints
+@app.post("/api/trips/{trip_id}/payment-screenshot", response_model=PaymentScreenshotResponse)
+@limiter.limit("5/minute")
+async def upload_payment_screenshot(
+    trip_id: int,
+    screenshot: UploadFile = File(...),
+    payment_date: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Upload a payment screenshot for a trip"""
+    # Check if trip exists and user has access
+    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Apply tenant filtering
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None and trip.tenant_id != tenant_filter:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Validate file
+    if not screenshot.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+    
+    if screenshot.size and screenshot.size > 10 * 1024 * 1024:  # 10MB limit
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+    
+    try:
+        # Read file data
+        file_data = await screenshot.read()
+        
+        # Parse payment date
+        from datetime import datetime
+        parsed_payment_date = datetime.fromisoformat(payment_date.replace('Z', '+00:00'))
+        
+        # Create payment screenshot record
+        payment_screenshot = PaymentScreenshot(
+            transaction_id=trip_id,
+            screenshot_data=file_data,
+            screenshot_url=f"/api/trips/{trip_id}/payment-screenshot/{current_user.id}",
+            file_name=screenshot.filename,
+            file_size=len(file_data),
+            mime_type=screenshot.content_type,
+            payment_date=parsed_payment_date,
+            uploaded_by=current_user.id,
+            tenant_id=current_user.tenant_id
+        )
+        
+        db.add(payment_screenshot)
+        db.commit()
+        db.refresh(payment_screenshot)
+        
+        return payment_screenshot
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to upload screenshot: {str(e)}")
+
+
+@app.get("/api/trips/{trip_id}/payment-screenshot/{user_id}")
+async def get_payment_screenshot(
+    trip_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get payment screenshot image"""
+    # Check if trip exists and user has access
+    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Apply tenant filtering
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None and trip.tenant_id != tenant_filter:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get screenshot
+    screenshot = db.query(PaymentScreenshot).filter(
+        PaymentScreenshot.transaction_id == trip_id,
+        PaymentScreenshot.uploaded_by == user_id
+    ).first()
+    
+    if not screenshot:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    
+    from fastapi.responses import Response
+    return Response(
+        content=screenshot.screenshot_data,
+        media_type=screenshot.mime_type,
+        headers={"Content-Disposition": f"inline; filename={screenshot.file_name}"}
+    )
+
+
+# Error Chat Endpoints
+@app.post("/api/trips/{trip_id}/error-chat", response_model=ErrorChatMessageResponse)
+@limiter.limit("10/minute")
+async def send_error_chat_message(
+    trip_id: int,
+    message_data: ErrorChatMessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Send an error chat message for a trip"""
+    # Check if trip exists and user has access
+    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Apply tenant filtering
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None and trip.tenant_id != tenant_filter:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    try:
+        # Create chat message
+        chat_message = ErrorChatMessage(
+            transaction_id=trip_id,
+            sender_id=current_user.id,
+            sender_type=current_user.role,
+            message=message_data.message,
+            timestamp=message_data.timestamp,
+            tenant_id=current_user.tenant_id
+        )
+        
+        db.add(chat_message)
+        db.commit()
+        db.refresh(chat_message)
+        
+        return chat_message
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
+
+
+@app.get("/api/trips/{trip_id}/error-chat")
+async def get_error_chat_messages(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all error chat messages for a trip"""
+    # Check if trip exists and user has access
+    trip = db.query(RideTransaction).filter(RideTransaction.id == trip_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Apply tenant filtering
+    tenant_filter = await get_tenant_filter(current_user)
+    if tenant_filter is not None and trip.tenant_id != tenant_filter:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get messages
+    messages = db.query(ErrorChatMessage).filter(
+        ErrorChatMessage.transaction_id == trip_id
+    ).order_by(ErrorChatMessage.timestamp.asc()).all()
+    
+    return messages
 
 
 if __name__ == "__main__":

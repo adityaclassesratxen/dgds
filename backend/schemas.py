@@ -258,3 +258,42 @@ class UserResponse(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)  # Pattern validation done in endpoint, not in schema
+
+
+# Payment Screenshot Schemas
+class PaymentScreenshotCreate(BaseModel):
+    payment_date: datetime
+
+class PaymentScreenshotResponse(BaseModel):
+    id: int
+    transaction_id: int
+    screenshot_url: Optional[str] = None
+    file_name: str
+    file_size: int
+    mime_type: str
+    payment_date: datetime
+    uploaded_at: datetime
+    is_verified: bool
+    verified_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+# Error Chat Schemas
+class ErrorChatMessageCreate(BaseModel):
+    message: str
+    timestamp: datetime
+
+class ErrorChatMessageResponse(BaseModel):
+    id: int
+    transaction_id: int
+    sender_id: int
+    sender_type: str
+    message: str
+    timestamp: datetime
+    is_read: bool
+    read_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
