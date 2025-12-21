@@ -252,7 +252,6 @@ function App() {
   
   // Payment and error chat state
   const [paymentScreenshots, setPaymentScreenshots] = useState({});
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedTripForPayment, setSelectedTripForPayment] = useState(null);
   const [errorChatMessages, setErrorChatMessages] = useState({});
   const [showErrorChat, setShowErrorChat] = useState(false);
