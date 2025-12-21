@@ -685,28 +685,19 @@ const AnalyticsDashboard = ({ api }) => {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-semibold text-white">{t('reports.title')}</h2>
-        <button
-          onClick={generateReport}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 transition"
-        >
-          {loading ? (
-            <RefreshCw className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
-          {loading ? 'Loading...' : t('reports.generate')}
-        </button>
+        <div>
+          <h2 className="text-2xl font-semibold text-white">{t('reports.title')}</h2>
+          <p className="text-sm text-slate-400 mt-1">Generate comprehensive reports with commission breakdown</p>
+        </div>
       </div>
 
       {/* Filters */}
       <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Report Type */}
-          <div>
+          <div className="md:col-span-2">
             <label className="block text-sm font-medium text-slate-400 mb-2">Report Type</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {reportTypes.map((type) => {
                 const Icon = type.icon;
                 return (
@@ -728,7 +719,7 @@ const AnalyticsDashboard = ({ api }) => {
           </div>
 
           {/* Date Range */}
-          <div>
+          <div className="md:col-span-2">
             <label className="block text-sm font-medium text-slate-400 mb-2">{t('reports.dateRange')}</label>
             <select
               value={dateRange}
@@ -761,6 +752,22 @@ const AnalyticsDashboard = ({ api }) => {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Generate Button */}
+        <div className="mt-4">
+          <button
+            onClick={generateReport}
+            disabled={loading || (dateRange === 'custom' && (!customDates.start || !customDates.end))}
+            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-blue-500 text-white font-medium hover:from-purple-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            {loading ? (
+              <RefreshCw className="h-5 w-5 animate-spin" />
+            ) : (
+              <BarChart3 className="h-5 w-5" />
+            )}
+            {loading ? 'Generating Report...' : t('reports.generate')}
+          </button>
         </div>
       </div>
 
