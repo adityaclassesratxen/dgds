@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Callable
 import os
 from datetime import datetime, timedelta
 from pydantic import BaseModel
@@ -32,6 +32,7 @@ from models import (
     PaymentStatus,
     User,
     UserRole,
+    Tenant,
 )
 from schemas import (
     CustomerCreate,
@@ -56,6 +57,7 @@ from auth import (
     require_driver
 )
 from tenant_filter import get_tenant_filter, apply_tenant_filter
+from dependencies import get_translator, create_error_response, create_success_response
 
 # Import ACCESS_TOKEN_EXPIRE_MINUTES from auth module
 from auth import ACCESS_TOKEN_EXPIRE_MINUTES
@@ -173,45 +175,6 @@ async def register_customer(user_data: UserRegister, db: Session = Depends(get_d
         "created_at": db_user.created_at
     }
 
-@app.post("/api/auth/login", response_model=Token)
-async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
-    """Login endpoint for all user types"""
-    
-    # Find user by email
-    user = db.query(User).filter(User.email == user_credentials.email).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Verify password
-    if not verify_password(user_credentials.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Check if user is active
-    if not user.is_active:
-        raise HTTPException(status_code=401, detail="Account is deactivated")
-    
-    # Update last login
-    user.last_login = datetime.now()
-    db.commit()
-    
-    # Create access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email, "role": user.role.value, "id": user.id},
-        expires_delta=access_token_expires
-    )
-    
-    # Get additional user info
-    user_info = {
-        "id": user.id,
-        "email": user.email,
-        "role": user.role.value,
-        "customer_id": user.customer_id,
-        "driver_id": user.driver_id,
-        "dispatcher_id": user.dispatcher_id
-    }
-    
-    # Add customer name if customer
     if user.customer_id:
         customer = db.query(Customer).filter(Customer.id == user.customer_id).first()
         if customer:
@@ -261,11 +224,108 @@ async def get_tenants(
             "id": tenant.id,
             "name": tenant.name,
             "code": tenant.code,
+            "description": tenant.description,
             "is_active": tenant.is_active,
             "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
         }
         for tenant in tenants
     ]
+
+@app.post("/api/tenants/")
+async def create_tenant(
+    tenant_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new tenant - only accessible by SUPER_ADMIN"""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can create tenants")
+    
+    # Check if tenant code already exists
+    existing = db.query(Tenant).filter(Tenant.code == tenant_data.get("code")).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Tenant code already exists")
+    
+    new_tenant = Tenant(
+        name=tenant_data.get("name"),
+        code=tenant_data.get("code"),
+        description=tenant_data.get("description", ""),
+        is_active=tenant_data.get("is_active", True)
+    )
+    db.add(new_tenant)
+    db.commit()
+    db.refresh(new_tenant)
+    
+    return {
+        "id": new_tenant.id,
+        "name": new_tenant.name,
+        "code": new_tenant.code,
+        "description": new_tenant.description,
+        "is_active": new_tenant.is_active,
+        "created_at": new_tenant.created_at.isoformat()
+    }
+
+@app.put("/api/tenants/{tenant_id}")
+async def update_tenant(
+    tenant_id: int,
+    tenant_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update a tenant - only accessible by SUPER_ADMIN"""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can update tenants")
+    
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Update fields
+    if "name" in tenant_data:
+        tenant.name = tenant_data["name"]
+    if "description" in tenant_data:
+        tenant.description = tenant_data["description"]
+    if "is_active" in tenant_data:
+        tenant.is_active = tenant_data["is_active"]
+    
+    db.commit()
+    db.refresh(tenant)
+    
+    return {
+        "id": tenant.id,
+        "name": tenant.name,
+        "code": tenant.code,
+        "description": tenant.description,
+        "is_active": tenant.is_active,
+        "created_at": tenant.created_at.isoformat()
+    }
+
+@app.delete("/api/tenants/{tenant_id}")
+async def delete_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a tenant - only accessible by SUPER_ADMIN"""
+    if current_user.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can delete tenants")
+    
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Check if tenant has data
+    customer_count = db.query(Customer).filter(Customer.tenant_id == tenant_id).count()
+    if customer_count > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete tenant with existing data ({customer_count} customers)"
+        )
+    
+    db.delete(tenant)
+    db.commit()
+    
+    return {"message": "Tenant deleted successfully"}
 
 # ============================================================================
 # DASHBOARD STATISTICS ENDPOINTS
@@ -302,7 +362,7 @@ async def get_dashboard_stats(
     last_login = last_login_query.order_by(User.last_login.desc()).first()
     
     # Get active drivers - tenant filtered
-    active_drivers_query = db.query(Driver).filter(Driver.is_active == True)
+    active_drivers_query = db.query(Driver)
     active_drivers_query = apply_tenant_filter(active_drivers_query, Driver, tenant_filter)
     active_drivers = active_drivers_query.order_by(Driver.created_at.desc()).limit(5).all()
     
@@ -1328,7 +1388,7 @@ async def summary_transactions(
     date_from: str = None,
     date_to: str = None,
     date_preset: str = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db)
 ):
     from sqlalchemy import func as sqlfunc
     from datetime import datetime, timedelta
@@ -1772,7 +1832,7 @@ async def driver_detailed_summary(
             {
                 "id": t.id,
                 "transaction_number": t.transaction_number,
-                "customer_name": t.customer.name if t.customer else None,
+                "customer_name": t.customer.name if t.customer else "N/A",
                 "total_amount": float(t.total_amount),
                 "driver_share": float(t.driver_share),
                 "is_paid": t.is_paid,
@@ -2019,20 +2079,27 @@ async def register(request: Request, user_data: UserRegister, db: Session = Depe
 
 @app.post("/api/auth/login", response_model=Token)
 @limiter.limit("10/minute")
-async def login(request: Request, credentials: UserLogin, db: Session = Depends(get_db)):
+async def login(
+    request: Request, 
+    credentials: UserLogin, 
+    db: Session = Depends(get_db),
+    translator: Callable = Depends(get_translator)
+):
     """Login and get access token"""
     user = db.query(User).filter(User.email == credentials.email).first()
     
     if not user or not verify_password(credentials.password, user.password_hash):
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect email or password"
+        raise create_error_response(
+            translator,
+            "auth.invalid_credentials",
+            status_code=401
         )
     
     if not user.is_active:
-        raise HTTPException(
-            status_code=403,
-            detail="User account is inactive"
+        raise create_error_response(
+            translator,
+            "auth.inactive_user",
+            status_code=403
         )
     
     # Update last login

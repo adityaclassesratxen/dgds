@@ -1097,7 +1097,7 @@ function App() {
                       value={loginForm.password}
                       onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
                       className="w-full px-4 py-3 pr-12 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="••••••••"
+                      placeholder={t('placeholders.enterPassword')}
                       required
                     />
                     <button
@@ -1140,13 +1140,13 @@ function App() {
             ) : (
               <form onSubmit={handleRegister} className="space-y-4">
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Full Name</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.fullName')}</label>
                   <input
                     type="text"
                     value={registerForm.name}
                     onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
                     className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                    placeholder="John Doe"
+                    placeholder={t('placeholders.enterName')}
                     required
                   />
                 </div>
@@ -1162,7 +1162,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Phone Number</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.phoneNumber')}</label>
                   <input
                     type="tel"
                     value={registerForm.phone}
@@ -1172,7 +1172,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Address</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.address')}</label>
                   <input
                     type="text"
                     value={registerForm.address.address_line}
@@ -1181,12 +1181,12 @@ function App() {
                       address: { ...registerForm.address, address_line: e.target.value }
                     })}
                     className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                    placeholder="123 Main Street"
+                    placeholder={t('placeholders.enterAddress')}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-slate-400 mb-2">City</label>
+                    <label className="block text-sm text-slate-400 mb-2">{t('auth.city')}</label>
                     <input
                       type="text"
                       value={registerForm.address.city}
@@ -1195,12 +1195,12 @@ function App() {
                         address: { ...registerForm.address, city: e.target.value }
                       })}
                       className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="Mumbai"
+                      placeholder={t('placeholders.enterCity')}
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm text-slate-400 mb-2">State</label>
+                    <label className="block text-sm text-slate-400 mb-2">{t('auth.state')}</label>
                     <input
                       type="text"
                       value={registerForm.address.state}
@@ -1209,13 +1209,13 @@ function App() {
                         address: { ...registerForm.address, state: e.target.value }
                       })}
                       className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="Maharashtra"
+                      placeholder={t('placeholders.enterState')}
                     />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-slate-400 mb-2">Postal Code</label>
+                    <label className="block text-sm text-slate-400 mb-2">{t('auth.postalCode')}</label>
                     <input
                       type="text"
                       value={registerForm.address.postal_code}
@@ -1224,11 +1224,11 @@ function App() {
                         address: { ...registerForm.address, postal_code: e.target.value }
                       })}
                       className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="400001"
+                      placeholder={t('placeholders.enterPostalCode')}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm text-slate-400 mb-2">Country</label>
+                    <label className="block text-sm text-slate-400 mb-2">{t('auth.country')}</label>
                     <input
                       type="text"
                       value={registerForm.address.country}
@@ -1237,7 +1237,7 @@ function App() {
                         address: { ...registerForm.address, country: e.target.value }
                       })}
                       className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="India"
+                      placeholder={t('placeholders.enterCountry')}
                       required
                     />
                   </div>
@@ -1250,7 +1250,7 @@ function App() {
                       value={registerForm.password}
                       onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
                       className="w-full px-4 py-3 pr-12 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="Min 8 chars: A-Z, a-z, 0-9, @$!%*?&"
+                      placeholder={t('auth.passwordHint')}
                       required
                     />
                     <button
@@ -1273,7 +1273,7 @@ function App() {
                       value={registerForm.confirmPassword}
                       onChange={(e) => setRegisterForm({ ...registerForm, confirmPassword: e.target.value })}
                       className="w-full px-4 py-3 pr-12 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="Re-enter password"
+                      placeholder={t('auth.confirmPassword')}
                       required
                     />
                     <button
@@ -1512,7 +1512,7 @@ function App() {
             {/* Tenant Selector - Admin/Super Admin Only */}
             {['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role) && (
               <div className="mb-3">
-                <label className="block text-xs text-slate-400 mb-2">Select Tenant</label>
+                <label className="block text-xs text-slate-400 mb-2">{t('sidebar.selectTenant')}</label>
                 <select
                   value={selectedTenant?.id || ''}
                   onChange={(e) => {
@@ -2049,7 +2049,7 @@ function App() {
 
         {view === 'customers' && (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-blue-500/10">
-            <h2 className="mb-6 text-2xl font-semibold text-white">All Customers</h2>
+            <h2 className="mb-6 text-2xl font-semibold text-white">{t('customer.title')}</h2>
             {loading ? (
               <p className="text-slate-400">Loading...</p>
             ) : customers.length === 0 ? (
@@ -2096,7 +2096,7 @@ function App() {
                           }}
                           className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
                         >
-                          View
+                          {t('buttons.view')}
                         </button>
                         <button 
                           onClick={async () => {
@@ -2106,7 +2106,7 @@ function App() {
                           }}
                           className="rounded-xl bg-amber-500/10 px-3 py-1 text-sm text-amber-300 transition hover:bg-amber-500/20"
                         >
-                          Edit
+                          {t('buttons.edit')}
                         </button>
                         <button 
                           onClick={async () => {
@@ -2117,7 +2117,7 @@ function App() {
                           }}
                           className="rounded-xl bg-red-500/10 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500/20"
                         >
-                          Archive
+                          {t('buttons.archive')}
                         </button>
                       </div>
                     </div>
@@ -2131,7 +2131,7 @@ function App() {
 
         {view === 'trips' && (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-blue-500/10">
-            <h2 className="mb-6 text-2xl font-semibold text-white">All Trips</h2>
+            <h2 className="mb-6 text-2xl font-semibold text-white">{t('trip.title')}</h2>
             {loading ? (
               <p className="text-slate-400">Loading...</p>
             ) : trips.length === 0 ? (
@@ -2161,7 +2161,7 @@ function App() {
                             {trip.status}
                           </span>
                           {!trip.is_paid && trip.status === 'COMPLETED' && (
-                            <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-red-500/20 text-red-300">UNPAID</span>
+                            <span className="px-2 py-0.5 rounded-lg text-xs font-medium bg-red-500/20 text-red-300">{t('trip.unpaid')}</span>
                           )}
                         </div>
                         
@@ -2233,7 +2233,7 @@ function App() {
 
         {view === 'addDriver' && (
           <div className="rounded-3xl border border-purple-800 bg-slate-900/80 p-6 shadow-xl shadow-purple-500/10">
-            <h2 className="mb-6 text-2xl font-semibold text-white">Register New Driver</h2>
+            <h2 className="mb-6 text-2xl font-semibold text-white">{t('driver.add')}</h2>
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -2330,7 +2330,7 @@ function App() {
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Country</span>
+                  <span className="text-slate-300">{t('auth.country')}</span>
                   <input
                     type="text"
                     value={driverForm.country}
@@ -2361,7 +2361,7 @@ function App() {
 
         {view === 'drivers' && (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-blue-500/10">
-            <h2 className="mb-6 text-2xl font-semibold text-white">All Drivers</h2>
+            <h2 className="mb-6 text-2xl font-semibold text-white">{t('driver.title')}</h2>
             {loading ? (
               <p className="text-slate-400">Loading...</p>
             ) : drivers.length === 0 ? (
@@ -2405,7 +2405,7 @@ function App() {
                           }}
                           className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
                         >
-                          View
+                          {t('buttons.view')}
                         </button>
                         <button 
                           onClick={async () => {
@@ -2415,7 +2415,7 @@ function App() {
                           }}
                           className="rounded-xl bg-amber-500/10 px-3 py-1 text-sm text-amber-300 transition hover:bg-amber-500/20"
                         >
-                          Edit
+                          {t('buttons.edit')}
                         </button>
                         <button 
                           onClick={async () => {
@@ -2426,7 +2426,7 @@ function App() {
                           }}
                           className="rounded-xl bg-red-500/10 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500/20"
                         >
-                          Archive
+                          {t('buttons.archive')}
                         </button>
                       </div>
                     </div>
@@ -2441,7 +2441,7 @@ function App() {
         {view === 'dispatchers' && (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-blue-500/10">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-semibold text-white">All Dispatchers</h2>
+              <h2 className="text-2xl font-semibold text-white">{t('dispatcher.title')}</h2>
               <button
                 onClick={() => {
                   setSelectedDispatcher({ name: '', email: '', contact_number: '' });
@@ -2450,7 +2450,7 @@ function App() {
                 className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
               >
                 <Plus className="inline h-4 w-4 mr-2" />
-                Add Dispatcher
+                {t('buttons.addDispatcher')}
               </button>
             </div>
             {loading ? (
@@ -2476,7 +2476,7 @@ function App() {
                           }}
                           className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
                         >
-                          View
+                          {t('buttons.view')}
                         </button>
                         <button 
                           onClick={async () => {
@@ -2486,7 +2486,7 @@ function App() {
                           }}
                           className="rounded-xl bg-amber-500/10 px-3 py-1 text-sm text-amber-300 transition hover:bg-amber-500/20"
                         >
-                          Edit
+                          {t('buttons.edit')}
                         </button>
                         <button 
                           onClick={async () => {
@@ -2497,7 +2497,7 @@ function App() {
                           }}
                           className="rounded-xl bg-red-500/10 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500/20"
                         >
-                          Archive
+                          {t('buttons.archive')}
                         </button>
                         <button 
                           onClick={() => {
@@ -2506,7 +2506,7 @@ function App() {
                           }}
                           className="rounded-xl bg-emerald-500/10 px-3 py-1 text-sm text-emerald-300 transition hover:bg-emerald-500/20"
                         >
-                          Create Booking
+                          {t('buttons.createBooking')}
                         </button>
                       </div>
                     </div>
@@ -2521,7 +2521,7 @@ function App() {
           <div className="space-y-6">
             {/* Add Vehicle Form */}
             <div className="rounded-3xl border border-cyan-800 bg-slate-900/80 p-6 shadow-xl shadow-cyan-500/10">
-              <h2 className="mb-6 text-2xl font-semibold text-white">Add New Vehicle</h2>
+              <h2 className="mb-6 text-2xl font-semibold text-white">{t('vehicle.add')}</h2>
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
@@ -2607,7 +2607,7 @@ function App() {
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Type</span>
+                  <span className="text-slate-300">{t('vehicle.type')}</span>
                   <select
                     value={vehicleForm.vehicle_type}
                     onChange={(e) => setVehicleForm(prev => ({ ...prev, vehicle_type: e.target.value }))}
@@ -2791,14 +2791,14 @@ function App() {
                   {currentUser?.role !== 'CUSTOMER' && (
                     <>
                       <label className="space-y-2 text-sm">
-                        <span className="text-slate-300">Dispatcher</span>
+                        <span className="text-slate-300">{t('trip.dispatcher')}</span>
                         <select
                           value={bookingForm.dispatcher_id}
                           onChange={(e) => setBookingForm(prev => ({ ...prev, dispatcher_id: e.target.value }))}
                           className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
                           required
                         >
-                          <option value="">Select Dispatcher</option>
+                          <option value="">{t('forms.selectDispatcher')}</option>
                           {dispatchers.map(d => (
                             <option key={d.id} value={d.id}>{d.name}</option>
                           ))}
@@ -3396,7 +3396,7 @@ function App() {
                                             }}
                                             className="px-3 py-1 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition text-xs font-medium"
                                           >
-                                            View Breakdown
+                                            {t('buttons.view')} Breakdown
                                           </button>
                                         </div>
                                       </div>
