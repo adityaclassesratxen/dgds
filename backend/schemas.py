@@ -227,6 +227,9 @@ class UserLogin(BaseModel):
 class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)  # Pattern validation done in endpoint, not in schema
+    name: str = Field(..., min_length=2, max_length=100)
+    address: Optional[AddressBase] = None
+    phone: Optional[str] = Field(None, max_length=20)
     role: str = Field(default="CUSTOMER")
     customer_id: Optional[int] = None
     driver_id: Optional[int] = None

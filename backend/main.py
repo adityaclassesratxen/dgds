@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Optional
 import os
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -98,15 +99,315 @@ def get_db():
     finally:
         db.close()
 
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@app.post("/api/auth/register", response_model=UserResponse)
+async def register_customer(user_data: UserRegister, db: Session = Depends(get_db)):
+    """Register a new customer with login credentials"""
+    
+    # Check if user already exists
+    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Check if customer already exists
+    existing_customer = db.query(Customer).filter(Customer.email == user_data.email).first()
+    if existing_customer:
+        raise HTTPException(status_code=400, detail="Email already registered as customer")
+    
+    # Create customer
+    db_customer = Customer(name=user_data.name, email=user_data.email)
+    
+    # Add primary address if provided
+    if user_data.address:
+        db_customer.addresses = [
+            CustomerAddress(
+                address_line=user_data.address.address_line,
+                city=user_data.address.city,
+                state=user_data.address.state,
+                postal_code=user_data.address.postal_code,
+                country=user_data.address.country,
+                is_primary=True,
+            )
+        ]
+    
+    # Add primary contact if provided
+    if user_data.phone:
+        db_customer.contact_numbers = [
+            ContactNumber(
+                label="Primary",
+                phone_number=user_data.phone,
+                is_primary=True,
+            )
+        ]
+    
+    db.add(db_customer)
+    db.flush()  # Get the customer ID
+    
+    # Create user account linked to customer
+    hashed_password = get_password_hash(user_data.password)
+    db_user = User(
+        email=user_data.email,
+        password_hash=hashed_password,
+        role=UserRole.CUSTOMER,
+        customer_id=db_customer.id,
+        is_active=True,
+        is_verified=True
+    )
+    
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    
+    return {
+        "id": db_user.id,
+        "email": db_user.email,
+        "role": db_user.role.value if hasattr(db_user.role, 'value') else db_user.role,
+        "is_active": db_user.is_active,
+        "is_verified": db_user.is_verified,
+        "customer_id": db_customer.id,
+        "driver_id": None,
+        "dispatcher_id": None,
+        "created_at": db_user.created_at
+    }
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
+    """Login endpoint for all user types"""
+    
+    # Find user by email
+    user = db.query(User).filter(User.email == user_credentials.email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Verify password
+    if not verify_password(user_credentials.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Check if user is active
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="Account is deactivated")
+    
+    # Update last login
+    user.last_login = datetime.now()
+    db.commit()
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email, "role": user.role.value, "id": user.id},
+        expires_delta=access_token_expires
+    )
+    
+    # Get additional user info
+    user_info = {
+        "id": user.id,
+        "email": user.email,
+        "role": user.role.value,
+        "customer_id": user.customer_id,
+        "driver_id": user.driver_id,
+        "dispatcher_id": user.dispatcher_id
+    }
+    
+    # Add customer name if customer
+    if user.customer_id:
+        customer = db.query(Customer).filter(Customer.id == user.customer_id).first()
+        if customer:
+            user_info["customer_name"] = customer.name
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": user_info
+    }
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get current user information"""
+    
+    user_info = {
+        "id": current_user.id,
+        "email": current_user.email,
+        "role": current_user.role.value if hasattr(current_user.role, 'value') else current_user.role,
+        "is_active": current_user.is_active,
+        "is_verified": current_user.is_verified,
+        "customer_id": current_user.customer_id,
+        "driver_id": current_user.driver_id,
+        "dispatcher_id": current_user.dispatcher_id,
+        "created_at": current_user.created_at
+    }
+    
+    return user_info
+
+# ============================================================================
+# TENANT MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@app.get("/api/tenants/")
+async def get_tenants(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all tenants - only accessible by ADMIN and SUPER_ADMIN"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    tenants = db.query(Tenant).all()
+    return [
+        {
+            "id": tenant.id,
+            "name": tenant.name,
+            "code": tenant.code,
+            "is_active": tenant.is_active,
+            "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+        }
+        for tenant in tenants
+    ]
+
+# ============================================================================
+# DASHBOARD STATISTICS ENDPOINTS
+# ============================================================================
+
+@app.get("/api/dashboard/stats")
+async def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """Get dashboard statistics"""
+    
+    # Get recent transactions (last 7) - tenant filtered
+    recent_tx_query = db.query(RideTransaction).filter(
+        RideTransaction.created_at >= datetime.now() - timedelta(days=7)
+    )
+    recent_tx_query = apply_tenant_filter(recent_tx_query, RideTransaction, tenant_filter)
+    recent_transactions = recent_tx_query.order_by(RideTransaction.created_at.desc()).limit(7).all()
+    
+    # Get customer stats - tenant filtered
+    customers_query = db.query(Customer).filter(Customer.is_archived == False)
+    customers_query = apply_tenant_filter(customers_query, Customer, tenant_filter)
+    total_customers = customers_query.count()
+    
+    # Get last logged in user (excluding current user) - tenant filtered if applicable
+    last_login_query = db.query(User).filter(
+        User.last_login.isnot(None),
+        User.id != current_user.id
+    )
+    # For non-admin users, only show users from their tenant
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.ADMIN]:
+        last_login_query = last_login_query.filter(User.tenant_id == current_user.tenant_id)
+    last_login = last_login_query.order_by(User.last_login.desc()).first()
+    
+    # Get active drivers - tenant filtered
+    active_drivers_query = db.query(Driver).filter(Driver.is_active == True)
+    active_drivers_query = apply_tenant_filter(active_drivers_query, Driver, tenant_filter)
+    active_drivers = active_drivers_query.order_by(Driver.created_at.desc()).limit(5).all()
+    
+    # Get active customers - tenant filtered
+    active_customers_query = db.query(Customer).filter(Customer.is_archived == False)
+    active_customers_query = apply_tenant_filter(active_customers_query, Customer, tenant_filter)
+    active_customers = active_customers_query.order_by(Customer.created_at.desc()).limit(5).all()
+    
+    # Get active dispatchers - tenant filtered
+    active_dispatchers_query = db.query(Dispatcher).filter(Dispatcher.is_active == True)
+    active_dispatchers_query = apply_tenant_filter(active_dispatchers_query, Dispatcher, tenant_filter)
+    active_dispatchers = active_dispatchers_query.order_by(Dispatcher.created_at.desc()).limit(5).all()
+    
+    # Get recent bookings - tenant filtered
+    recent_bookings_query = db.query(RideTransaction)
+    recent_bookings_query = apply_tenant_filter(recent_bookings_query, RideTransaction, tenant_filter)
+    recent_bookings = recent_bookings_query.order_by(RideTransaction.created_at.desc()).limit(5).all()
+    
+    return {
+        "recent_transactions": [
+            {
+                "id": tx.id,
+                "transaction_number": tx.transaction_number,
+                "pickup_location": tx.pickup_location,
+                "destination_location": tx.destination_location,
+                "status": tx.status.value if hasattr(tx.status, 'value') else tx.status,
+                "created_at": tx.created_at.isoformat(),
+                "customer_name": tx.customer.name if tx.customer else "N/A"
+            }
+            for tx in recent_transactions
+        ],
+        "customer_stats": {
+            "total": total_customers,
+            "recent_this_week": db.query(Customer).filter(
+                Customer.created_at >= datetime.now() - timedelta(days=7)
+            ).count()
+        },
+        "last_login": {
+            "email": last_login.email if last_login else None,
+            "last_login": last_login.last_login.isoformat() if last_login and last_login.last_login else None,
+            "role": last_login.role.value if last_login and hasattr(last_login.role, 'value') else (last_login.role if last_login else None)
+        },
+        "active_drivers": [
+            {
+                "id": driver.id,
+                "name": driver.name,
+                "phone_number": driver.phone_number,
+                "is_available": driver.is_available
+            }
+            for driver in active_drivers
+        ],
+        "active_customers": [
+            {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "phone": customer.phone
+            }
+            for customer in active_customers
+        ],
+        "active_dispatchers": [
+            {
+                "id": dispatcher.id,
+                "name": dispatcher.name,
+                "email": dispatcher.email,
+                "phone": dispatcher.phone
+            }
+            for dispatcher in active_dispatchers
+        ],
+        "recent_bookings": [
+            {
+                "id": booking.id,
+                "transaction_number": booking.transaction_number,
+                "customer_name": booking.customer.name if booking.customer else "N/A",
+                "driver_name": booking.driver.name if booking.driver else "Not Assigned",
+                "created_at": booking.created_at.isoformat()
+            }
+            for booking in recent_bookings
+        ]
+    }
+
 @app.post("/api/customers/", response_model=CustomerResponse)
-async def create_customer(customer: CustomerCreate, db: Session = Depends(get_db)):
+async def create_customer(
+    customer: CustomerCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
     existing_customer = (
         db.query(Customer).filter(Customer.email == customer.email).first()
     )
     if existing_customer:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    db_customer = Customer(name=customer.name, email=customer.email)
+    # Determine tenant_id for the new customer
+    if tenant_filter is not None:
+        # Admin/Super Admin creating for a specific tenant
+        customer_tenant_id = tenant_filter
+    elif current_user.tenant_id:
+        # Non-admin users create in their own tenant
+        customer_tenant_id = current_user.tenant_id
+    else:
+        raise HTTPException(status_code=403, detail="Cannot determine tenant for customer creation")
+
+    db_customer = Customer(name=customer.name, email=customer.email, tenant_id=customer_tenant_id)
 
     db_customer.addresses = [
         CustomerAddress(
@@ -135,8 +436,15 @@ async def create_customer(customer: CustomerCreate, db: Session = Depends(get_db
     return db_customer
 
 @app.get("/api/customers/", response_model=list[CustomerResponse])
-async def get_customers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
+async def get_customers(
+    skip: int = 0, 
+    limit: int = 100, 
+    include_archived: bool = False, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
     query = db.query(Customer)
+    query = apply_tenant_filter(query, Customer, tenant_filter)
     if not include_archived:
         query = query.filter(Customer.is_archived == False)
     customers = query.offset(skip).limit(limit).all()
@@ -144,8 +452,14 @@ async def get_customers(skip: int = 0, limit: int = 100, include_archived: bool 
 
 
 @app.get("/api/customers/{customer_id}")
-async def get_customer(customer_id: int, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+async def get_customer(
+    customer_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Customer).filter(Customer.id == customer_id)
+    query = apply_tenant_filter(query, Customer, tenant_filter)
+    customer = query.first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     return {
@@ -171,8 +485,15 @@ class CustomerUpdate(BaseModel):
 
 
 @app.put("/api/customers/{customer_id}")
-async def update_customer(customer_id: int, customer_data: CustomerUpdate, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+async def update_customer(
+    customer_id: int, 
+    customer_data: CustomerUpdate, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Customer).filter(Customer.id == customer_id)
+    query = apply_tenant_filter(query, Customer, tenant_filter)
+    customer = query.first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     if customer_data.name:
@@ -185,8 +506,14 @@ async def update_customer(customer_id: int, customer_data: CustomerUpdate, db: S
 
 
 @app.delete("/api/customers/{customer_id}")
-async def archive_customer(customer_id: int, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+async def archive_customer(
+    customer_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Customer).filter(Customer.id == customer_id)
+    query = apply_tenant_filter(query, Customer, tenant_filter)
+    customer = query.first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     customer.is_archived = True
@@ -195,8 +522,14 @@ async def archive_customer(customer_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/customers/{customer_id}/restore")
-async def restore_customer(customer_id: int, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+async def restore_customer(
+    customer_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Customer).filter(Customer.id == customer_id)
+    query = apply_tenant_filter(query, Customer, tenant_filter)
+    customer = query.first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     customer.is_archived = False
@@ -211,14 +544,27 @@ async def get_transactions(skip: int = 0, limit: int = 100, db: Session = Depend
 
 
 @app.post("/api/drivers/", response_model=DriverResponse)
-async def create_driver(driver: DriverCreate, db: Session = Depends(get_db)):
+async def create_driver(
+    driver: DriverCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
     existing_driver = (
         db.query(Driver).filter(Driver.name == driver.name).first()
     )
     if existing_driver:
         raise HTTPException(status_code=400, detail="Driver name already exists")
 
-    db_driver = Driver(name=driver.name)
+    # Determine tenant_id for the new driver
+    if tenant_filter is not None:
+        driver_tenant_id = tenant_filter
+    elif current_user.tenant_id:
+        driver_tenant_id = current_user.tenant_id
+    else:
+        raise HTTPException(status_code=403, detail="Cannot determine tenant for driver creation")
+
+    db_driver = Driver(name=driver.name, tenant_id=driver_tenant_id)
 
     db_driver.addresses = [
         DriverAddress(
@@ -248,8 +594,15 @@ async def create_driver(driver: DriverCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/drivers/", response_model=list[DriverResponse])
-async def get_drivers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
+async def get_drivers(
+    skip: int = 0, 
+    limit: int = 100, 
+    include_archived: bool = False, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
     query = db.query(Driver)
+    query = apply_tenant_filter(query, Driver, tenant_filter)
     if not include_archived:
         query = query.filter(Driver.is_archived == False)
     drivers = query.offset(skip).limit(limit).all()
@@ -257,8 +610,14 @@ async def get_drivers(skip: int = 0, limit: int = 100, include_archived: bool = 
 
 
 @app.get("/api/drivers/{driver_id}")
-async def get_driver(driver_id: int, db: Session = Depends(get_db)):
-    driver = db.query(Driver).filter(Driver.id == driver_id).first()
+async def get_driver(
+    driver_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Driver).filter(Driver.id == driver_id)
+    query = apply_tenant_filter(query, Driver, tenant_filter)
+    driver = query.first()
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     return {
@@ -282,8 +641,15 @@ class DriverUpdate(BaseModel):
 
 
 @app.put("/api/drivers/{driver_id}")
-async def update_driver(driver_id: int, driver_data: DriverUpdate, db: Session = Depends(get_db)):
-    driver = db.query(Driver).filter(Driver.id == driver_id).first()
+async def update_driver(
+    driver_id: int, 
+    driver_data: DriverUpdate, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Driver).filter(Driver.id == driver_id)
+    query = apply_tenant_filter(query, Driver, tenant_filter)
+    driver = query.first()
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     if driver_data.name:
@@ -294,8 +660,14 @@ async def update_driver(driver_id: int, driver_data: DriverUpdate, db: Session =
 
 
 @app.delete("/api/drivers/{driver_id}")
-async def archive_driver(driver_id: int, db: Session = Depends(get_db)):
-    driver = db.query(Driver).filter(Driver.id == driver_id).first()
+async def archive_driver(
+    driver_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Driver).filter(Driver.id == driver_id)
+    query = apply_tenant_filter(query, Driver, tenant_filter)
+    driver = query.first()
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     driver.is_archived = True
@@ -304,8 +676,14 @@ async def archive_driver(driver_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/drivers/{driver_id}/restore")
-async def restore_driver(driver_id: int, db: Session = Depends(get_db)):
-    driver = db.query(Driver).filter(Driver.id == driver_id).first()
+async def restore_driver(
+    driver_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Driver).filter(Driver.id == driver_id)
+    query = apply_tenant_filter(query, Driver, tenant_filter)
+    driver = query.first()
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     driver.is_archived = False
@@ -314,8 +692,15 @@ async def restore_driver(driver_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/dispatchers/")
-async def get_dispatchers(skip: int = 0, limit: int = 100, include_archived: bool = False, db: Session = Depends(get_db)):
+async def get_dispatchers(
+    skip: int = 0, 
+    limit: int = 100, 
+    include_archived: bool = False, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
     query = db.query(Dispatcher)
+    query = apply_tenant_filter(query, Dispatcher, tenant_filter)
     if not include_archived:
         query = query.filter(Dispatcher.is_archived == False)
     dispatchers = query.offset(skip).limit(limit).all()
@@ -332,8 +717,14 @@ async def get_dispatchers(skip: int = 0, limit: int = 100, include_archived: boo
 
 
 @app.get("/api/dispatchers/{dispatcher_id}")
-async def get_dispatcher(dispatcher_id: int, db: Session = Depends(get_db)):
-    dispatcher = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id).first()
+async def get_dispatcher(
+    dispatcher_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id)
+    query = apply_tenant_filter(query, Dispatcher, tenant_filter)
+    dispatcher = query.first()
     if not dispatcher:
         raise HTTPException(status_code=404, detail="Dispatcher not found")
     return {
@@ -359,11 +750,25 @@ class DispatcherUpdate(BaseModel):
 
 
 @app.post("/api/dispatchers/")
-async def create_dispatcher(dispatcher: DispatcherCreate, db: Session = Depends(get_db)):
+async def create_dispatcher(
+    dispatcher: DispatcherCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    # Determine tenant_id for the new dispatcher
+    if tenant_filter is not None:
+        dispatcher_tenant_id = tenant_filter
+    elif current_user.tenant_id:
+        dispatcher_tenant_id = current_user.tenant_id
+    else:
+        raise HTTPException(status_code=403, detail="Cannot determine tenant for dispatcher creation")
+
     db_dispatcher = Dispatcher(
         name=dispatcher.name,
         contact_number=dispatcher.contact_number,
         email=dispatcher.email,
+        tenant_id=dispatcher_tenant_id,
     )
     db.add(db_dispatcher)
     db.commit()
@@ -377,8 +782,15 @@ async def create_dispatcher(dispatcher: DispatcherCreate, db: Session = Depends(
 
 
 @app.put("/api/dispatchers/{dispatcher_id}")
-async def update_dispatcher(dispatcher_id: int, dispatcher_data: DispatcherUpdate, db: Session = Depends(get_db)):
-    dispatcher = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id).first()
+async def update_dispatcher(
+    dispatcher_id: int, 
+    dispatcher_data: DispatcherUpdate, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id)
+    query = apply_tenant_filter(query, Dispatcher, tenant_filter)
+    dispatcher = query.first()
     if not dispatcher:
         raise HTTPException(status_code=404, detail="Dispatcher not found")
     if dispatcher_data.name:
@@ -393,8 +805,14 @@ async def update_dispatcher(dispatcher_id: int, dispatcher_data: DispatcherUpdat
 
 
 @app.delete("/api/dispatchers/{dispatcher_id}")
-async def archive_dispatcher(dispatcher_id: int, db: Session = Depends(get_db)):
-    dispatcher = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id).first()
+async def archive_dispatcher(
+    dispatcher_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id)
+    query = apply_tenant_filter(query, Dispatcher, tenant_filter)
+    dispatcher = query.first()
     if not dispatcher:
         raise HTTPException(status_code=404, detail="Dispatcher not found")
     dispatcher.is_archived = True
@@ -403,8 +821,14 @@ async def archive_dispatcher(dispatcher_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/dispatchers/{dispatcher_id}/restore")
-async def restore_dispatcher(dispatcher_id: int, db: Session = Depends(get_db)):
-    dispatcher = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id).first()
+async def restore_dispatcher(
+    dispatcher_id: int, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(Dispatcher).filter(Dispatcher.id == dispatcher_id)
+    query = apply_tenant_filter(query, Dispatcher, tenant_filter)
+    dispatcher = query.first()
     if not dispatcher:
         raise HTTPException(status_code=404, detail="Dispatcher not found")
     dispatcher.is_archived = False
@@ -413,8 +837,15 @@ async def restore_dispatcher(dispatcher_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/vehicles/")
-async def get_vehicles(skip: int = 0, limit: int = 100, customer_id: Optional[int] = None, db: Session = Depends(get_db)):
+async def get_vehicles(
+    skip: int = 0, 
+    limit: int = 100, 
+    customer_id: Optional[int] = None, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
     query = db.query(CustomerVehicle)
+    query = apply_tenant_filter(query, CustomerVehicle, tenant_filter)
     if customer_id:
         query = query.filter(CustomerVehicle.customer_id == customer_id)
     vehicles = query.offset(skip).limit(limit).all()
@@ -425,10 +856,12 @@ async def get_vehicles(skip: int = 0, limit: int = 100, customer_id: Optional[in
             "nickname": v.nickname,
             "make": v.vehicle_make,
             "model": v.vehicle_model,
-            "type": v.vehicle_type,
+            "year": v.year,
+            "color": v.color,
+            "license_plate": v.license_plate,
+            "vin": v.vin,
             "customer_id": v.customer_id,
-            "is_automatic": v.is_automatic,
-            "transmission_type": v.transmission_type,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
         }
         for v in vehicles
     ]
@@ -518,23 +951,48 @@ def generate_transaction_number(db: Session) -> str:
 
 
 @app.post("/api/bookings/", response_model=BookingResponse)
-async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
-    # Ensure dispatcher, customer, driver, vehicle exist (basic validation)
-    dispatcher = db.query(Dispatcher).get(booking.dispatcher_id)
+async def create_booking(
+    booking: BookingCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    # Determine tenant_id for the new booking
+    if tenant_filter is not None:
+        booking_tenant_id = tenant_filter
+    elif current_user.tenant_id:
+        booking_tenant_id = current_user.tenant_id
+    else:
+        raise HTTPException(status_code=403, detail="Cannot determine tenant for booking creation")
+
+    # Ensure dispatcher, customer, driver, vehicle exist and belong to the same tenant
+    dispatcher = db.query(Dispatcher).filter(
+        Dispatcher.id == booking.dispatcher_id,
+        Dispatcher.tenant_id == booking_tenant_id
+    ).first()
     if not dispatcher:
-        raise HTTPException(status_code=404, detail="Dispatcher not found")
+        raise HTTPException(status_code=404, detail="Dispatcher not found or not in your tenant")
 
-    customer = db.query(Customer).get(booking.customer_id)
+    customer = db.query(Customer).filter(
+        Customer.id == booking.customer_id,
+        Customer.tenant_id == booking_tenant_id
+    ).first()
     if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        raise HTTPException(status_code=404, detail="Customer not found or not in your tenant")
 
-    driver = db.query(Driver).get(booking.driver_id)
+    driver = db.query(Driver).filter(
+        Driver.id == booking.driver_id,
+        Driver.tenant_id == booking_tenant_id
+    ).first()
     if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+        raise HTTPException(status_code=404, detail="Driver not found or not in your tenant")
 
-    vehicle = db.query(CustomerVehicle).get(booking.vehicle_id)
+    vehicle = db.query(CustomerVehicle).filter(
+        CustomerVehicle.id == booking.vehicle_id,
+        CustomerVehicle.tenant_id == booking_tenant_id
+    ).first()
     if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
+        raise HTTPException(status_code=404, detail="Vehicle not found or not in your tenant")
 
     import os
     hourly_rate = int(os.getenv("HOURLY_RATE", "400"))
@@ -565,6 +1023,7 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         admin_share=admin_share,
         dispatcher_share=dispatcher_share,
         super_admin_share=super_admin_share,
+        tenant_id=booking_tenant_id,
     )
 
     transaction.events = [
@@ -585,9 +1044,16 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/bookings/", response_model=list[BookingResponse])
-async def list_bookings(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+async def list_bookings(
+    skip: int = 0, 
+    limit: int = 50, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(RideTransaction)
+    query = apply_tenant_filter(query, RideTransaction, tenant_filter)
     bookings = (
-        db.query(RideTransaction).order_by(RideTransaction.created_at.desc())
+        query.order_by(RideTransaction.created_at.desc())
         .offset(skip)
         .limit(limit)
         .all()
@@ -601,8 +1067,11 @@ async def update_booking_status(
     status: str,
     description: str = "Status updated",
     db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
-    transaction = db.query(RideTransaction).filter(RideTransaction.id == transaction_id).first()
+    query = db.query(RideTransaction).filter(RideTransaction.id == transaction_id)
+    query = apply_tenant_filter(query, RideTransaction, tenant_filter)
+    transaction = query.first()
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
@@ -631,8 +1100,11 @@ async def mark_payment(
     paid_amount: float,
     payment_method: PaymentMethod = PaymentMethod.CASH,
     db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
-    transaction = db.query(RideTransaction).filter(RideTransaction.id == transaction_id).first()
+    query = db.query(RideTransaction).filter(RideTransaction.id == transaction_id)
+    query = apply_tenant_filter(query, RideTransaction, tenant_filter)
+    transaction = query.first()
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
@@ -675,7 +1147,8 @@ async def summary_by_customer(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     from sqlalchemy import func as sqlfunc
     query = (
@@ -689,6 +1162,11 @@ async def summary_by_customer(
         )
         .outerjoin(RideTransaction, RideTransaction.customer_id == Customer.id)
     )
+    
+    # Apply tenant filter
+    query = apply_tenant_filter(query, Customer, tenant_filter)
+    if tenant_filter is not None:
+        query = query.filter(RideTransaction.tenant_id == tenant_filter)
     
     # Apply filters
     if dispatcher_id:
@@ -727,7 +1205,8 @@ async def summary_by_driver(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     from sqlalchemy import func as sqlfunc
     query = (
@@ -745,6 +1224,11 @@ async def summary_by_driver(
         )
         .outerjoin(RideTransaction, RideTransaction.driver_id == Driver.id)
     )
+    
+    # Apply tenant filter
+    query = apply_tenant_filter(query, Driver, tenant_filter)
+    if tenant_filter is not None:
+        query = query.filter(RideTransaction.tenant_id == tenant_filter)
     
     # Apply filters
     if dispatcher_id:
@@ -782,7 +1266,8 @@ async def summary_by_dispatcher(
     transaction_number: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     from sqlalchemy import func as sqlfunc
     query = (
@@ -800,6 +1285,11 @@ async def summary_by_dispatcher(
         )
         .outerjoin(RideTransaction, RideTransaction.dispatcher_id == Dispatcher.id)
     )
+    
+    # Apply tenant filter
+    query = apply_tenant_filter(query, Dispatcher, tenant_filter)
+    if tenant_filter is not None:
+        query = query.filter(RideTransaction.tenant_id == tenant_filter)
     
     # Apply filters
     if dispatcher_id:
@@ -2009,4 +2499,4 @@ async def get_seeding_status(
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=2070, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=2060, reload=True)

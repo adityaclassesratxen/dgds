@@ -42,13 +42,20 @@ const api = axios.create({
   },
 });
 
-// Add request interceptor to include auth token
+// Add request interceptor to include auth token and tenant header
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Add X-Tenant-Id header if tenant is selected
+    const selectedTenantId = localStorage.getItem('selected_tenant_id');
+    if (selectedTenantId) {
+      config.headers['X-Tenant-Id'] = selectedTenantId;
+    }
+    
     return config;
   },
   (error) => {
@@ -101,6 +108,28 @@ const createEmptyContact = (isPrimary = false) => ({
   isPrimary,
 });
 
+const DEVANAGARI_DIGITS = {
+  '0': '०',
+  '1': '१',
+  '2': '२',
+  '3': '३',
+  '4': '४',
+  '5': '५',
+  '6': '६',
+  '7': '७',
+  '8': '८',
+  '9': '९',
+};
+
+const convertDigitsForLanguage = (value, language) => {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  if (language === 'sa') {
+    return str.replace(/[0-9]/g, (digit) => DEVANAGARI_DIGITS[digit] || digit);
+  }
+  return str;
+};
+
 const statCards = (t) => [
   { label: t('nav.customers'), value: '10+' },
   { label: t('nav.drivers'), value: '15+' },
@@ -109,7 +138,21 @@ const statCards = (t) => [
 ];
 
 function App() {
-  const { t } = useTranslation(); // Add translation hook
+  const { t, i18n } = useTranslation(); // Add translation hook
+
+  const convertDigits = useCallback(
+    (value) => convertDigitsForLanguage(value, i18n.language),
+    [i18n.language]
+  );
+
+  const formatDate = useCallback(
+    (dateValue) => {
+      if (!dateValue) return '';
+      const dateString = new Date(dateValue).toLocaleString();
+      return convertDigits(dateString);
+    },
+    [convertDigits]
+  );
   
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -121,7 +164,22 @@ function App() {
   });
   const [showLogin, setShowLogin] = useState(!isAuthenticated);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
-  const [registerForm, setRegisterForm] = useState({ email: '', password: '', confirmPassword: '', role: 'CUSTOMER' });
+  const [registerForm, setRegisterForm] = useState({ 
+    email: '', 
+    password: '', 
+    confirmPassword: '', 
+    role: 'CUSTOMER',
+    name: '',
+    phone: '',
+    address: {
+      address_line: '',
+      city: '',
+      state: '',
+      postal_code: '',
+      country: 'India',
+      is_primary: true
+    }
+  });
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -217,6 +275,15 @@ function App() {
   const [revenueBreakdownLoading, setRevenueBreakdownLoading] = useState(false);
   const [shareBooking, setShareBooking] = useState(null); // For booking share modal
   
+  // Dashboard state
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  
+  // Tenant management state
+  const [tenants, setTenants] = useState([]);
+  const [selectedTenant, setSelectedTenant] = useState(null);
+  const [tenantLoading, setTenantLoading] = useState(false);
+  
   // Expandable sections state for drill-down
   const [expandedDrivers, setExpandedDrivers] = useState({});
   const [expandedCustomers, setExpandedCustomers] = useState({});
@@ -227,6 +294,96 @@ function App() {
   // Database seeding state
   const [seedingStatus, setSeedingStatus] = useState(null);
   const [showSeedingModal, setShowSeedingModal] = useState(false);
+
+  // Fetch tenants for admin/super_admin users
+  const fetchTenants = useCallback(async () => {
+    if (!isAuthenticated || !currentUser) return;
+    
+    // Only fetch tenants for admin/super_admin users
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role)) {
+      // For non-admin users, clear any selected tenant
+      localStorage.removeItem('selected_tenant_id');
+      setSelectedTenant(null);
+      return;
+    }
+    
+    setTenantLoading(true);
+    try {
+      const response = await api.get('/api/tenants/');
+      setTenants(response.data);
+      
+      // Restore selected tenant from localStorage if exists
+      const savedTenantId = localStorage.getItem('selected_tenant_id');
+      if (savedTenantId) {
+        const tenant = response.data.find(t => t.id === parseInt(savedTenantId));
+        if (tenant) {
+          setSelectedTenant(tenant);
+        } else {
+          // Clear invalid tenant selection
+          localStorage.removeItem('selected_tenant_id');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch tenants:', error);
+    } finally {
+      setTenantLoading(false);
+    }
+  }, [isAuthenticated, currentUser]);
+
+  // Handle tenant selection
+  const handleTenantSelect = (tenant) => {
+    setSelectedTenant(tenant);
+    if (tenant) {
+      localStorage.setItem('selected_tenant_id', tenant.id.toString());
+    } else {
+      localStorage.removeItem('selected_tenant_id');
+    }
+    
+    // Refresh data when tenant changes
+    if (isAuthenticated) {
+      fetchDashboardStats();
+      // You can add other data refresh calls here
+    }
+  };
+
+  // Fetch dashboard statistics
+  const fetchDashboardStats = useCallback(async () => {
+    if (!isAuthenticated) return;
+    
+    setDashboardLoading(true);
+    try {
+      console.log('Fetching dashboard stats...');
+      const response = await api.get('/api/dashboard/stats');
+      console.log('Dashboard stats response:', response.data);
+      setDashboardStats(response.data);
+    } catch (error) {
+      console.error('Failed to fetch dashboard stats:', error.response?.data || error);
+      if (error.response?.status === 401) {
+        console.log('Authentication failed, clearing tokens...');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setShowLogin(true);
+      }
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  // Fetch dashboard stats when authenticated
+  useEffect(() => {
+    if (isAuthenticated && view === 'register') {
+      fetchDashboardStats();
+    }
+  }, [isAuthenticated, view, fetchDashboardStats]);
+
+  // Fetch tenants when authenticated and user changes
+  useEffect(() => {
+    if (isAuthenticated && currentUser) {
+      fetchTenants();
+    }
+  }, [isAuthenticated, currentUser, fetchTenants]);
 
   // Authentication handlers
   const handleLogin = async (e) => {
@@ -301,6 +458,9 @@ function App() {
       const registerResponse = await api.post('/api/auth/register', {
         email: registerForm.email,
         password: registerForm.password,
+        name: registerForm.name,
+        phone: registerForm.phone,
+        address: registerForm.address,
         role: registerForm.role,
       });
       
@@ -316,7 +476,22 @@ function App() {
       setIsAuthenticated(true);
       setCurrentUser(user);
       setShowLogin(false);
-      setRegisterForm({ email: '', password: '', confirmPassword: '', role: 'CUSTOMER' });
+      setRegisterForm({ 
+        email: '', 
+        password: '', 
+        confirmPassword: '', 
+        role: 'CUSTOMER',
+        name: '',
+        phone: '',
+        address: {
+          address_line: '',
+          city: '',
+          state: '',
+          postal_code: '',
+          country: 'India',
+          is_primary: true
+        }
+      });
       setAuthError(''); // Clear any errors
     } catch (error) {
       // Show detailed error message
@@ -341,7 +516,7 @@ function App() {
         }
       } else if (error.message) {
         if (error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
-          errorMessage = 'Cannot connect to server. Please ensure the backend is running on http://localhost:5060';
+          errorMessage = `Cannot connect to server. Please ensure the backend is running on ${API_BASE_URL}`;
         } else {
           errorMessage = error.message;
         }
@@ -965,6 +1140,17 @@ function App() {
             ) : (
               <form onSubmit={handleRegister} className="space-y-4">
                 <div>
+                  <label className="block text-sm text-slate-400 mb-2">Full Name</label>
+                  <input
+                    type="text"
+                    value={registerForm.name}
+                    onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                    placeholder="John Doe"
+                    required
+                  />
+                </div>
+                <div>
                   <label className="block text-sm text-slate-400 mb-2">{t('auth.email')}</label>
                   <input
                     type="email"
@@ -974,6 +1160,87 @@ function App() {
                     placeholder="your@email.com"
                     required
                   />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={registerForm.phone}
+                    onChange={(e) => setRegisterForm({ ...registerForm, phone: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                    placeholder="+919876543210"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">Address</label>
+                  <input
+                    type="text"
+                    value={registerForm.address.address_line}
+                    onChange={(e) => setRegisterForm({ 
+                      ...registerForm, 
+                      address: { ...registerForm.address, address_line: e.target.value }
+                    })}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                    placeholder="123 Main Street"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-2">City</label>
+                    <input
+                      type="text"
+                      value={registerForm.address.city}
+                      onChange={(e) => setRegisterForm({ 
+                        ...registerForm, 
+                        address: { ...registerForm.address, city: e.target.value }
+                      })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                      placeholder="Mumbai"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-2">State</label>
+                    <input
+                      type="text"
+                      value={registerForm.address.state}
+                      onChange={(e) => setRegisterForm({ 
+                        ...registerForm, 
+                        address: { ...registerForm.address, state: e.target.value }
+                      })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                      placeholder="Maharashtra"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-2">Postal Code</label>
+                    <input
+                      type="text"
+                      value={registerForm.address.postal_code}
+                      onChange={(e) => setRegisterForm({ 
+                        ...registerForm, 
+                        address: { ...registerForm.address, postal_code: e.target.value }
+                      })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                      placeholder="400001"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-2">Country</label>
+                    <input
+                      type="text"
+                      value={registerForm.address.country}
+                      onChange={(e) => setRegisterForm({ 
+                        ...registerForm, 
+                        address: { ...registerForm.address, country: e.target.value }
+                      })}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
+                      placeholder="India"
+                      required
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm text-slate-400 mb-2">{t('auth.password')}</label>
@@ -1105,7 +1372,7 @@ function App() {
         
         {/* Quick Actions */}
         <div className="mb-4">
-          <p className="text-xs uppercase tracking-wider text-slate-500 px-2 mb-2">Quick Actions</p>
+          <p className="text-xs uppercase tracking-wider text-slate-500 px-2 mb-2">{t('sidebar.quickActions')}</p>
           <button
             onClick={() => setView('booking')}
             className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
@@ -1153,7 +1420,7 @@ function App() {
         
         {/* Navigation */}
         <div className="flex-1">
-          <p className="text-xs uppercase tracking-wider text-slate-500 px-2 mb-2">Navigation</p>
+          <p className="text-xs uppercase tracking-wider text-slate-500 px-2 mb-2">{t('sidebar.navigation')}</p>
           <button
             onClick={() => setView('customers')}
             className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
@@ -1237,10 +1504,38 @@ function App() {
         {currentUser && (
           <div className="border-t border-slate-800 pt-4 mt-auto">
             <div className="rounded-xl bg-slate-800/50 p-3 mb-3">
-              <p className="text-xs text-slate-400 mb-1">Logged in as</p>
+              <p className="text-xs text-slate-400 mb-1">{t('sidebar.loggedInAs')}</p>
               <p className="text-sm font-semibold text-white truncate">{currentUser.email}</p>
               <p className="text-xs text-purple-300 mt-1">{currentUser.role}</p>
             </div>
+            
+            {/* Tenant Selector - Admin/Super Admin Only */}
+            {['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role) && (
+              <div className="mb-3">
+                <label className="block text-xs text-slate-400 mb-2">Select Tenant</label>
+                <select
+                  value={selectedTenant?.id || ''}
+                  onChange={(e) => {
+                    const tenant = tenants.find(t => t.id === parseInt(e.target.value));
+                    handleTenantSelect(tenant);
+                  }}
+                  disabled={tenantLoading}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-purple-500 disabled:opacity-50"
+                >
+                  <option value="">{tenantLoading ? 'Loading...' : 'All Tenants'}</option>
+                  {tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.name} ({tenant.code})
+                    </option>
+                  ))}
+                </select>
+                {selectedTenant && (
+                  <p className="text-xs text-green-400 mt-1">
+                    Active: {selectedTenant.name}
+                  </p>
+                )}
+              </div>
+            )}
             
             {/* Seed Database Button - Admin Only */}
             {(currentUser.role === 'admin' || currentUser.role === 'super_admin') && (
@@ -1249,7 +1544,7 @@ function App() {
                 className="w-full py-2 px-3 rounded-xl text-sm font-medium transition bg-green-500/10 text-green-300 hover:bg-green-500/20 flex items-center justify-center gap-2 mb-2"
               >
                 <Plus className="h-4 w-4" />
-                Seed Database
+                {t('sidebar.seedDatabase')}
               </button>
             )}
             
@@ -1258,7 +1553,7 @@ function App() {
               className="w-full py-2 px-3 rounded-xl text-sm font-medium transition bg-red-500/10 text-red-300 hover:bg-red-500/20 flex items-center justify-center gap-2"
             >
               <AlertCircle className="h-4 w-4" />
-              Logout
+              {t('sidebar.logout')}
             </button>
           </div>
         )}
@@ -1269,7 +1564,7 @@ function App() {
             {statCards(t).slice(0, 2).map((stat) => (
               <div key={stat.label} className="rounded-xl bg-slate-800/50 p-2 text-center">
                 <p className="text-[10px] uppercase tracking-wider text-slate-500">{stat.label}</p>
-                <p className="text-sm font-bold text-white">{stat.value}</p>
+                <p className="text-sm font-bold text-white">{convertDigits(stat.value)}</p>
               </div>
             ))}
           </div>
@@ -1293,17 +1588,17 @@ function App() {
               {view === 'analytics' && t('reports.title')}
             </h1>
             <p className="mt-1 text-slate-400 text-sm">
-              {view === 'register' && 'Capture customer master data before dispatchers start live bookings.'}
-              {view === 'customers' && 'View and manage all registered customers.'}
-              {view === 'trips' && 'Track all trips and their statuses.'}
-              {view === 'drivers' && 'Manage driver information and availability.'}
-              {view === 'dispatchers' && 'Manage dispatcher accounts and assignments.'}
-            {view === 'booking' && 'Create a new booking for a customer.'}
-            {view === 'addDriver' && 'Register a new driver in the system.'}
-            {view === 'vehicles' && 'Manage customer vehicles for bookings.'}
-            {view === 'analytics' && 'Generate comprehensive reports with commission breakdown.'}
-            {view === 'summary' && 'View financial reports and commission breakdowns.'}
-          </p>
+              {view === 'register' && t('pageDescriptions.register')}
+              {view === 'customers' && t('pageDescriptions.customers')}
+              {view === 'trips' && t('pageDescriptions.trips')}
+              {view === 'drivers' && t('pageDescriptions.drivers')}
+              {view === 'dispatchers' && t('pageDescriptions.dispatchers')}
+              {view === 'booking' && t('pageDescriptions.booking')}
+              {view === 'addDriver' && t('pageDescriptions.addDriver')}
+              {view === 'vehicles' && t('pageDescriptions.vehicles')}
+              {view === 'analytics' && t('pageDescriptions.analytics')}
+              {view === 'summary' && t('pageDescriptions.summary')}
+            </p>
         </div>
         
         {/* Language Switcher in Header */}
@@ -1323,8 +1618,8 @@ function App() {
                   <UserPlus className="h-6 w-6" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold text-white">Customer Details</h2>
-                  <p className="text-sm text-slate-400">Identity and primary communication channel.</p>
+                  <h2 className="text-xl font-semibold text-white">{t('register.customerDetailsTitle')}</h2>
+                  <p className="text-sm text-slate-400">{t('register.customerDetailsSubtitle')}</p>
                 </div>
               </div>
 
@@ -1332,14 +1627,14 @@ function App() {
                 <label className="space-y-2 text-sm">
                   <span className="flex items-center gap-2 text-slate-300">
                     <UserPlus className="h-4 w-4 text-purple-300" />
-                    Name
+                    {t('register.nameLabel')}
                   </span>
                   <input
                     type="text"
                     name="name"
                     value={customerInfo.name}
                     onChange={handleCustomerChange}
-                    placeholder="Enter customer name"
+                    placeholder={t('register.namePlaceholder')}
                     className={`w-full rounded-2xl border bg-slate-950/60 px-4 py-3 text-white placeholder-slate-500 focus:border-purple-500 focus:outline-none ${
                       errors.name ? 'border-red-500' : 'border-slate-800'
                     }`}
@@ -1350,14 +1645,14 @@ function App() {
                 <label className="space-y-2 text-sm">
                   <span className="flex items-center gap-2 text-slate-300">
                     <Mail className="h-4 w-4 text-purple-300" />
-                    Email
+                    {t('register.emailLabel')}
                   </span>
                   <input
                     type="email"
                     name="email"
                     value={customerInfo.email}
                     onChange={handleCustomerChange}
-                    placeholder="Enter customer email"
+                    placeholder={t('register.emailPlaceholder')}
                     className={`w-full rounded-2xl border bg-slate-950/60 px-4 py-3 text-white placeholder-slate-500 focus:border-purple-500 focus:outline-none ${
                       errors.email ? 'border-red-500' : 'border-slate-800'
                     }`}
@@ -1374,8 +1669,8 @@ function App() {
                     <MapPin className="h-6 w-6" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-semibold text-white">Addresses</h2>
-                    <p className="text-sm text-slate-400">Every customer needs one primary location.</p>
+                    <h2 className="text-xl font-semibold text-white">{t('register.addressesTitle')}</h2>
+                    <p className="text-sm text-slate-400">{t('register.addressesSubtitle')}</p>
                   </div>
                 </div>
                 <button
@@ -1384,7 +1679,7 @@ function App() {
                   className="flex items-center gap-2 rounded-2xl border border-blue-500/40 px-4 py-2 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/10"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Address
+                  {t('register.addAddress')}
                 </button>
               </div>
 
@@ -1397,7 +1692,7 @@ function App() {
                     <div className="mb-4 flex items-center justify-between text-sm text-slate-400">
                       <span className="flex items-center gap-2 font-semibold text-white">
                         <Compass className="h-5 w-5 text-blue-300" />
-                        Address #{index + 1}
+                        {t('register.addressCard', { number: convertDigits(index + 1) })}
                       </span>
                       {addresses.length > 1 && (
                         <button
@@ -1406,55 +1701,59 @@ function App() {
                           className="flex items-center gap-1 text-xs text-red-400 transition hover:text-red-200"
                         >
                           <Trash2 className="h-4 w-4" />
-                          Remove
+                          {t('common.delete')}
                         </button>
                       )}
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="text-sm text-slate-300">
-                        Address Line
+                        {t('register.addressLineLabel')}
                         <input
                           type="text"
                           value={address.addressLine}
                           onChange={(e) => handleAddressChange(index, 'addressLine', e.target.value)}
-                          placeholder="Street, building, etc."
+                          placeholder={t('register.addressLinePlaceholder')}
                           className="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
                         />
                       </label>
                       <label className="text-sm text-slate-300">
-                        City
+                        {t('register.cityLabel')}
                         <input
                           type="text"
                           value={address.city}
                           onChange={(e) => handleAddressChange(index, 'city', e.target.value)}
+                          placeholder={t('register.cityPlaceholder')}
                           className="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
                         />
                       </label>
                       <label className="text-sm text-slate-300">
-                        State
+                        {t('register.stateLabel')}
                         <input
                           type="text"
                           value={address.state}
                           onChange={(e) => handleAddressChange(index, 'state', e.target.value)}
+                          placeholder={t('register.statePlaceholder')}
                           className="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
                         />
                       </label>
                       <label className="text-sm text-slate-300">
-                        Postal Code
+                        {t('register.postalCodeLabel')}
                         <input
                           type="text"
                           value={address.postalCode}
                           onChange={(e) => handleAddressChange(index, 'postalCode', e.target.value)}
+                          placeholder={t('register.postalCodePlaceholder')}
                           className="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
                         />
                       </label>
                       <label className="text-sm text-slate-300 md:col-span-2">
-                        Country
+                        {t('register.countryLabel')}
                         <input
                           type="text"
                           value={address.country}
                           onChange={(e) => handleAddressChange(index, 'country', e.target.value)}
+                          placeholder={t('register.countryPlaceholder')}
                           className="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
                         />
                       </label>
@@ -1468,7 +1767,7 @@ function App() {
                         name="primary-address"
                         className="h-4 w-4 text-blue-500 focus:ring-blue-500"
                       />
-                      Primary Address
+                      {t('register.primaryAddress')}
                     </label>
                   </div>
                 ))}
@@ -1483,8 +1782,8 @@ function App() {
                     <Phone className="h-6 w-6" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-semibold text-white">Contact Numbers</h2>
-                    <p className="text-sm text-slate-400">Label every channel and pick one primary.</p>
+                    <h2 className="text-xl font-semibold text-white">{t('register.contactsTitle')}</h2>
+                    <p className="text-sm text-slate-400">{t('register.contactsSubtitle')}</p>
                   </div>
                 </div>
                 <button
@@ -1493,7 +1792,7 @@ function App() {
                   className="flex items-center gap-2 rounded-2xl border border-emerald-500/40 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/10"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Contact
+                  {t('register.addContact')}
                 </button>
               </div>
 
@@ -1506,7 +1805,7 @@ function App() {
                     <div className="mb-4 flex items-center justify-between text-sm text-slate-400">
                       <span className="flex items-center gap-2 font-semibold text-white">
                         <Phone className="h-5 w-5 text-emerald-300" />
-                        Contact #{index + 1}
+                        {t('register.contactCard', { number: convertDigits(index + 1) })}
                       </span>
                       {contacts.length > 1 && (
                         <button
@@ -1515,29 +1814,29 @@ function App() {
                           className="flex items-center gap-1 text-xs text-red-400 transition hover:text-red-200"
                         >
                           <Trash2 className="h-4 w-4" />
-                          Remove
+                          {t('common.delete')}
                         </button>
                       )}
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="text-sm text-slate-300">
-                        Label
+                        {t('register.labelLabel')}
                         <input
                           type="text"
                           value={contact.label}
                           onChange={(e) => handleContactChange(index, 'label', e.target.value)}
-                          placeholder="e.g., Mobile, Home"
+                          placeholder={t('register.labelPlaceholder')}
                           className="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
                         />
                       </label>
                       <label className="text-sm text-slate-300">
-                        Phone Number
+                        {t('register.phoneLabel')}
                         <input
                           type="tel"
                           value={contact.phoneNumber}
                           onChange={(e) => handleContactChange(index, 'phoneNumber', e.target.value)}
-                          placeholder="Enter phone number"
+                          placeholder={t('register.phonePlaceholder')}
                           className="mt-1 w-full rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
                         />
                       </label>
@@ -1551,7 +1850,7 @@ function App() {
                         name="primary-contact"
                         className="h-4 w-4 text-emerald-500 focus:ring-emerald-500"
                       />
-                      Primary Contact
+                      {t('register.primaryContact')}
                     </label>
                   </div>
                 ))}
@@ -1567,12 +1866,12 @@ function App() {
               {isSubmitting ? (
                 <>
                   <span className="h-3 w-3 animate-ping rounded-full bg-white" />
-                  Registering...
+                  {t('register.registering')}
                 </>
               ) : (
                 <>
                   <CheckCircle2 className="h-5 w-5" />
-                  Register Customer
+                  {t('register.registerButton')}
                 </>
               )}
             </button>
@@ -1592,62 +1891,157 @@ function App() {
 
           <aside className="space-y-6 rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-emerald-500/10">
             <div className="space-y-3">
-              <h2 className="text-xl font-semibold text-white">Live Summary</h2>
-              <p className="text-sm text-slate-400">Snapshot of what the dispatcher sees.</p>
+              <h2 className="text-xl font-semibold text-white">{t('dashboard.liveSummary')}</h2>
+              <p className="text-sm text-slate-400">{t('dashboard.realTimeStats')}</p>
             </div>
 
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Customer</p>
-                <div className="mt-3 space-y-1">
-                  <p className="text-lg font-semibold text-white">
-                    {customerInfo.name || 'Waiting for name'}
-                  </p>
-                  <p className="text-sm text-slate-400">
-                    {customerInfo.email || 'Email will appear here'}
-                  </p>
+            {dashboardLoading ? (
+              <div className="space-y-4">
+                <div className="animate-pulse">
+                  <div className="h-20 rounded-2xl bg-slate-800"></div>
+                  <div className="mt-4 h-20 rounded-2xl bg-slate-800"></div>
+                  <div className="mt-4 h-20 rounded-2xl bg-slate-800"></div>
                 </div>
               </div>
-
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Primary Address</p>
-                {summary.primaryAddress ? (
-                  <div className="mt-3 space-y-1 text-sm text-slate-300">
-                    <p>{summary.primaryAddress.addressLine}</p>
-                    <p>
-                      {summary.primaryAddress.city}, {summary.primaryAddress.state}
+            ) : dashboardStats ? (
+              <div className="space-y-4">
+                {/* Customer Stats */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t('dashboard.customerStats')}</p>
+                  <div className="mt-3 space-y-1">
+                    <p className="text-lg font-semibold text-white">
+                      {t('dashboard.total')}: {dashboardStats.customer_stats.total}
                     </p>
-                    <p>
-                      {summary.primaryAddress.country} - {summary.primaryAddress.postalCode}
+                    <p className="text-sm text-slate-400">
+                      {t('dashboard.newThisWeek')}: {dashboardStats.customer_stats.recent_this_week}
                     </p>
                   </div>
-                ) : (
-                  <p className="mt-3 text-sm text-slate-500">Assign a primary address to preview.</p>
-                )}
-              </div>
+                </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Primary Contact</p>
-                {summary.primaryContact ? (
-                  <div className="mt-3 space-y-1 text-sm text-slate-300">
-                    <p className="font-semibold">{summary.primaryContact.label}</p>
-                    <p>{summary.primaryContact.phoneNumber}</p>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-slate-500">Assign a primary contact to preview.</p>
-                )}
-              </div>
+                {/* Last Login */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t('dashboard.lastLogin')}</p>
+                  {dashboardStats.last_login.email ? (
+                    <div className="mt-3 space-y-1 text-sm text-slate-300">
+                      <p className="font-semibold">{dashboardStats.last_login.email}</p>
+                      <p className="text-xs text-slate-400">
+                        {t('dashboard.role')}: {dashboardStats.last_login.role}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {new Date(dashboardStats.last_login.last_login).toLocaleString()}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">{t('dashboard.noRecentLogins')}</p>
+                  )}
+                </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Seeded Journeys</p>
-                <ul className="mt-3 space-y-2 text-sm text-slate-300">
-                  <li>TXN-SEED-001 · City Loop · 4h</li>
-                  <li>TXN-SEED-002 · Corporate Shuttle · 8h</li>
-                  <li>TXN-SEED-003 · Airport Run · 6h</li>
-                  <li>TXN-SEED-004/005 variations</li>
-                </ul>
+                {/* Recent Transactions */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t('dashboard.recentTransactions')}</p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                    {dashboardStats.recent_transactions.length > 0 ? (
+                      dashboardStats.recent_transactions.map((tx, index) => (
+                        <li key={tx.id} className="border-b border-slate-800 pb-2 last:border-0">
+                          <p className="font-semibold">{tx.transaction_number}</p>
+                          <p className="text-xs text-slate-400">
+                            {tx.pickup_location} → {tx.destination_location}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {tx.customer_name} • {tx.status}
+                          </p>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-sm text-slate-500">{t('dashboard.noTransactions')}</li>
+                    )}
+                  </ul>
+                </div>
+
+                {/* Active Drivers */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t('dashboard.activeDrivers')}</p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                    {dashboardStats.active_drivers.length > 0 ? (
+                      dashboardStats.active_drivers.map((driver) => (
+                        <li key={driver.id} className="flex justify-between items-center">
+                          <span className="font-semibold">{driver.name}</span>
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            driver.is_available 
+                              ? 'bg-green-500/20 text-green-300' 
+                              : 'bg-red-500/20 text-red-300'
+                          }`}>
+                            {driver.is_available ? t('dashboard.available') : t('dashboard.busy')}
+                          </span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-sm text-slate-500">{t('dashboard.noActiveDrivers')}</li>
+                    )}
+                  </ul>
+                </div>
+
+                {/* Active Customers */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t('dashboard.lastActiveCustomers')}</p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                    {dashboardStats.active_customers && dashboardStats.active_customers.length > 0 ? (
+                      dashboardStats.active_customers.map((customer) => (
+                        <li key={customer.id} className="flex justify-between items-center">
+                          <span className="font-semibold">{customer.name}</span>
+                          <span className="text-xs text-slate-400">{customer.email}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-sm text-slate-500">{t('customer.noCustomers')}</li>
+                    )}
+                  </ul>
+                </div>
+
+                {/* Active Dispatchers */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t('dashboard.lastActiveDispatchers')}</p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                    {dashboardStats.active_dispatchers && dashboardStats.active_dispatchers.length > 0 ? (
+                      dashboardStats.active_dispatchers.map((dispatcher) => (
+                        <li key={dispatcher.id} className="flex justify-between items-center">
+                          <span className="font-semibold">{dispatcher.name}</span>
+                          <span className="text-xs text-slate-400">{dispatcher.email}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-sm text-slate-500">{t('dashboard.noActiveDispatchers')}</li>
+                    )}
+                  </ul>
+                </div>
+
+                {/* Recent Bookings */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t('dashboard.latestBookings')}</p>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                    {dashboardStats.recent_bookings.length > 0 ? (
+                      dashboardStats.recent_bookings.map((booking) => (
+                        <li key={booking.id} className="border-b border-slate-800 pb-2 last:border-0">
+                          <p className="font-semibold">{booking.transaction_number}</p>
+                          <p className="text-xs text-slate-400">
+                            {t('customer.title')}: {booking.customer_name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {t('driver.title')}: {booking.driver_name}
+                          </p>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-sm text-slate-500">{t('dashboard.noBookings')}</li>
+                    )}
+                  </ul>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-400">{t('dashboard.unableToLoad')}</p>
+              </div>
+            )}
           </aside>
           </div>
           </>
@@ -2324,7 +2718,9 @@ function App() {
 
         {view === 'booking' && (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-emerald-500/10">
-            <h2 className="mb-6 text-2xl font-semibold text-white">Create New Booking</h2>
+            <h2 className="mb-6 text-2xl font-semibold text-white">
+              {currentUser?.role === 'CUSTOMER' ? 'Book a Ride' : 'Create New Booking'}
+            </h2>
             {loading ? (
               <p className="text-slate-400">Loading data...</p>
             ) : (
@@ -2334,11 +2730,20 @@ function App() {
                   setIsSubmitting(true);
                   setSubmitStatus('');
                   try {
-                    const response = await api.post('/api/bookings/', {
-                      dispatcher_id: parseInt(bookingForm.dispatcher_id),
-                      customer_id: parseInt(bookingForm.customer_id),
-                      driver_id: parseInt(bookingForm.driver_id),
-                      vehicle_id: parseInt(bookingForm.vehicle_id),
+                    // For customers, use default dispatcher and driver will be assigned later
+                    const bookingData = {
+                      dispatcher_id: currentUser?.role === 'CUSTOMER' ? 
+                        (dispatchers.length > 0 ? dispatchers[0].id : 1) : 
+                        parseInt(bookingForm.dispatcher_id),
+                      customer_id: currentUser?.role === 'CUSTOMER' ? 
+                        currentUser.customer_id : 
+                        parseInt(bookingForm.customer_id),
+                      driver_id: currentUser?.role === 'CUSTOMER' ? 
+                        (drivers.length > 0 ? drivers[0].id : 1) : 
+                        parseInt(bookingForm.driver_id),
+                      vehicle_id: currentUser?.role === 'CUSTOMER' ? 
+                        (vehicles.length > 0 ? vehicles[0].id : 1) : 
+                        parseInt(bookingForm.vehicle_id),
                       pickup_location: bookingForm.pickup_location,
                       destination_location: bookingForm.destination_location,
                       return_location: bookingForm.return_location || null,
@@ -2352,7 +2757,9 @@ function App() {
                       late_fine: parseFloat(bookingForm.late_fine) || 0,
                       pickup_location_fare: parseFloat(bookingForm.pickup_location_fare) || 0,
                       accommodation_included: bookingForm.accommodation_included,
-                    });
+                    };
+                    
+                    const response = await api.post('/api/bookings/', bookingData);
                     setSubmitStatus(`Booking created: ${response.data.transaction_number}`);
                     setBookingForm({
                       dispatcher_id: '',
@@ -2381,62 +2788,76 @@ function App() {
                 className="space-y-4"
               >
                 <div className="grid gap-4 md:grid-cols-2">
-                  <label className="space-y-2 text-sm">
-                    <span className="text-slate-300">Dispatcher</span>
-                    <select
-                      value={bookingForm.dispatcher_id}
-                      onChange={(e) => setBookingForm(prev => ({ ...prev, dispatcher_id: e.target.value }))}
-                      className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
-                      required
-                    >
-                      <option value="">Select Dispatcher</option>
-                      {dispatchers.map(d => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-sm">
-                    <span className="text-slate-300">Customer</span>
-                    <select
-                      value={bookingForm.customer_id}
-                      onChange={(e) => setBookingForm(prev => ({ ...prev, customer_id: e.target.value }))}
-                      className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
-                      required
-                    >
-                      <option value="">Select Customer</option>
-                      {customers.map(c => (
-                        <option key={c.id} value={c.id}>{c.name} ({c.email})</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-sm">
-                    <span className="text-slate-300">Driver</span>
-                    <select
-                      value={bookingForm.driver_id}
-                      onChange={(e) => setBookingForm(prev => ({ ...prev, driver_id: e.target.value }))}
-                      className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
-                      required
-                    >
-                      <option value="">Select Driver</option>
-                      {drivers.map(d => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-sm">
-                    <span className="text-slate-300">Vehicle</span>
-                    <select
-                      value={bookingForm.vehicle_id}
-                      onChange={(e) => setBookingForm(prev => ({ ...prev, vehicle_id: e.target.value }))}
-                      className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
-                      required
-                    >
-                      <option value="">Select Vehicle</option>
-                      {vehicles.map(v => (
-                        <option key={v.id} value={v.id}>{v.nickname} - {v.registration_number} ({v.make} {v.model})</option>
-                      ))}
-                    </select>
-                  </label>
+                  {currentUser?.role !== 'CUSTOMER' && (
+                    <>
+                      <label className="space-y-2 text-sm">
+                        <span className="text-slate-300">Dispatcher</span>
+                        <select
+                          value={bookingForm.dispatcher_id}
+                          onChange={(e) => setBookingForm(prev => ({ ...prev, dispatcher_id: e.target.value }))}
+                          className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                          required
+                        >
+                          <option value="">Select Dispatcher</option>
+                          {dispatchers.map(d => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-2 text-sm">
+                        <span className="text-slate-300">Customer</span>
+                        <select
+                          value={bookingForm.customer_id}
+                          onChange={(e) => setBookingForm(prev => ({ ...prev, customer_id: e.target.value }))}
+                          className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                          required
+                        >
+                          <option value="">Select Customer</option>
+                          {customers.map(c => (
+                            <option key={c.id} value={c.id}>{c.name} ({c.email})</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-2 text-sm">
+                        <span className="text-slate-300">Driver</span>
+                        <select
+                          value={bookingForm.driver_id}
+                          onChange={(e) => setBookingForm(prev => ({ ...prev, driver_id: e.target.value }))}
+                          className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                          required
+                        >
+                          <option value="">Select Driver</option>
+                          {drivers.map(d => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="space-y-2 text-sm">
+                        <span className="text-slate-300">Vehicle</span>
+                        <select
+                          value={bookingForm.vehicle_id}
+                          onChange={(e) => setBookingForm(prev => ({ ...prev, vehicle_id: e.target.value }))}
+                          className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                          required
+                        >
+                          <option value="">Select Vehicle</option>
+                          {vehicles.map(v => (
+                            <option key={v.id} value={v.id}>{v.nickname} ({v.vehicle_make})</option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  )}
+                  {currentUser?.role === 'CUSTOMER' && (
+                    <div className="md:col-span-2 p-4 bg-blue-500/10 rounded-xl border border-blue-500/30">
+                      <p className="text-sm text-blue-300">
+                        <strong>Booking as:</strong> {currentUser.customer_name || 'Customer'}
+                      </p>
+                      <p className="text-xs text-blue-200 mt-1">
+                        A dispatcher will be assigned and driver details will be shared after confirmation.
+                      </p>
+                    </div>
+                  )}
                   <label className="space-y-2 text-sm">
                     <span className="text-slate-300">Pickup Location</span>
                     <input

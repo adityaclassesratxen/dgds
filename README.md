@@ -1,5 +1,10 @@
 # DGDS Clone - Ride Booking Management System
 
+## Port Configuration
+- **Frontend:** http://localhost:2070
+- **Backend API:** http://localhost:2060
+- **PostgreSQL Database:** localhost:2050
+
 ## Overview
 A comprehensive ride booking management system built with FastAPI (backend) and React (frontend). This system manages customers, drivers, dispatchers, vehicles, bookings, payments, and financial reporting.
 
