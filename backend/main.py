@@ -55,7 +55,7 @@ from auth import (
     require_dispatcher,
     require_driver
 )
-from tenant_filter import get_tenant_filter
+from tenant_filter import get_tenant_filter, apply_tenant_filter
 
 # Import ACCESS_TOKEN_EXPIRE_MINUTES from auth module
 from auth import ACCESS_TOKEN_EXPIRE_MINUTES
