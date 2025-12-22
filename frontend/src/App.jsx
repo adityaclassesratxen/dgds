@@ -1,5 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import './i18n'; // Import i18n configuration
+import { useTranslation } from 'react-i18next';
 import {
   Car,
   UserPlus,
@@ -19,10 +21,13 @@ import {
   Truck,
   Eye,
   EyeOff,
+  Share2,
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line
 } from 'recharts';
+import LanguageSwitcher from './components/LanguageSwitcher';
+import BookingShareModal from './components/BookingShareModal';
 
 // API Configuration - Uses environment variable or falls back to localhost
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:2060';
@@ -96,14 +101,16 @@ const createEmptyContact = (isPrimary = false) => ({
   isPrimary,
 });
 
-const statCards = [
-  { label: 'Customers', value: '10+' },
-  { label: 'Drivers', value: '15+' },
-  { label: 'Dispatchers', value: '3' },
-  { label: 'Transactions', value: '5 seed' },
+const statCards = (t) => [
+  { label: t('nav.customers'), value: '10+' },
+  { label: t('nav.drivers'), value: '15+' },
+  { label: t('nav.dispatchers'), value: '3' },
+  { label: t('trip.title'), value: '5 seed' },
 ];
 
 function App() {
+  const { t } = useTranslation(); // Add translation hook
+  
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return !!localStorage.getItem('auth_token');
@@ -163,6 +170,14 @@ function App() {
     return_location: '',
     ride_duration_hours: 4,
     payment_method: 'RAZORPAY',
+    // Expense fields
+    food_bill: 0,
+    outstation_bill: 0,
+    toll_fees: 0,
+    accommodation_bill: 0,
+    late_fine: 0,
+    pickup_location_fare: 0,
+    accommodation_included: false,
   });
   const [driverForm, setDriverForm] = useState({
     name: '',
@@ -197,6 +212,10 @@ function App() {
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [vehicleTransmissionFilter, setVehicleTransmissionFilter] = useState('all'); // 'all', 'automatic', 'manual'
+  const [selectedDriverForBreakdown, setSelectedDriverForBreakdown] = useState(null);
+  const [driverRevenueBreakdown, setDriverRevenueBreakdown] = useState(null);
+  const [revenueBreakdownLoading, setRevenueBreakdownLoading] = useState(false);
+  const [shareBooking, setShareBooking] = useState(null); // For booking share modal
   
   // Expandable sections state for drill-down
   const [expandedDrivers, setExpandedDrivers] = useState({});
@@ -791,6 +810,22 @@ function App() {
     }
   };
 
+  // Fetch driver revenue breakdown
+  const fetchDriverRevenueBreakdown = async (driverId) => {
+    setRevenueBreakdownLoading(true);
+    setSelectedDriverForBreakdown(driverId);
+    try {
+      const response = await api.get(`/api/analytics/drivers/${driverId}/revenue-breakdown`, {
+        params: { time_filter: analyticsTimeFilter }
+      });
+      setDriverRevenueBreakdown(response.data);
+    } catch (error) {
+      console.error('Failed to fetch driver revenue breakdown:', error);
+    } finally {
+      setRevenueBreakdownLoading(false);
+    }
+  };
+
   // Toggle expandable sections for drill-down
   const toggleDriverExpand = (driverId) => {
     setExpandedDrivers(prev => ({
@@ -835,7 +870,12 @@ function App() {
           <div className="bg-slate-900 rounded-3xl border border-slate-800 p-8 shadow-2xl">
             <div className="flex items-center gap-3 mb-8 justify-center">
               <Car className="h-8 w-8 text-purple-300" />
-              <span className="text-xl uppercase tracking-[0.2em] font-semibold text-purple-300">DGDS CLONE</span>
+              <span className="text-xl uppercase tracking-[0.2em] font-semibold text-purple-300">{t('app.title')}</span>
+            </div>
+            
+            {/* Language Switcher */}
+            <div className="flex justify-center mb-6">
+              <LanguageSwitcher />
             </div>
             
             <div className="flex gap-2 mb-6">
@@ -847,7 +887,7 @@ function App() {
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                Login
+                {t('auth.login')}
               </button>
               <button
                 onClick={() => setShowLogin(false)}
@@ -857,14 +897,14 @@ function App() {
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                Register
+                {t('auth.register')}
               </button>
             </div>
 
             {showLogin ? (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Email</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.email')}</label>
                   <input
                     type="email"
                     value={loginForm.email}
@@ -875,7 +915,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Password</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.password')}</label>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
@@ -919,13 +959,13 @@ function App() {
                   disabled={authLoading}
                   className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-500 to-blue-500 text-white font-semibold hover:from-purple-600 hover:to-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {authLoading ? 'Logging in...' : 'Login'}
+                  {authLoading ? t('common.loading') : t('auth.login')}
                 </button>
               </form>
             ) : (
               <form onSubmit={handleRegister} className="space-y-4">
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Email</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.email')}</label>
                   <input
                     type="email"
                     value={registerForm.email}
@@ -936,7 +976,7 @@ function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Password</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.password')}</label>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
@@ -959,7 +999,7 @@ function App() {
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Confirm Password</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.confirmPassword')}</label>
                   <div className="relative">
                     <input
                       type={showConfirmPassword ? "text" : "password"}
@@ -979,16 +1019,16 @@ function App() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">Role</label>
+                  <label className="block text-sm text-slate-400 mb-2">{t('auth.role')}</label>
                   <select
                     value={registerForm.role}
                     onChange={(e) => setRegisterForm({ ...registerForm, role: e.target.value })}
                     className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:border-purple-500"
                   >
-                    <option value="CUSTOMER">Customer</option>
-                    <option value="DRIVER">Driver</option>
-                    <option value="DISPATCHER">Dispatcher</option>
-                    <option value="ADMIN">Admin</option>
+                    <option value="CUSTOMER">{t('roles.customer')}</option>
+                    <option value="DRIVER">{t('roles.driver')}</option>
+                    <option value="DISPATCHER">{t('roles.dispatcher')}</option>
+                    <option value="ADMIN">{t('roles.admin')}</option>
                   </select>
                 </div>
                 {authError && (
@@ -1001,49 +1041,49 @@ function App() {
                   disabled={authLoading}
                   className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-500 to-blue-500 text-white font-semibold hover:from-purple-600 hover:to-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {authLoading ? 'Registering...' : 'Register'}
+                  {authLoading ? t('common.loading') : t('auth.register')}
                 </button>
               </form>
             )}
 
             {/* Quick Login Section */}
             <div className="mt-6 pt-6 border-t border-slate-800">
-              <p className="text-xs text-slate-400 mb-3 text-center">Quick Login (Test Accounts)</p>
+              <p className="text-xs text-slate-400 mb-3 text-center">{t('auth.quickLogin')}</p>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => handleQuickLogin('customer')}
                   disabled={authLoading}
                   className="px-3 py-2 rounded-lg bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition text-xs font-medium disabled:opacity-50"
                 >
-                  👤 Customer
+                  👤 {t('roles.customer')}
                 </button>
                 <button
                   onClick={() => handleQuickLogin('driver')}
                   disabled={authLoading}
                   className="px-3 py-2 rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition text-xs font-medium disabled:opacity-50"
                 >
-                  🚗 Driver
+                  🚗 {t('roles.driver')}
                 </button>
                 <button
                   onClick={() => handleQuickLogin('dispatcher')}
                   disabled={authLoading}
                   className="px-3 py-2 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition text-xs font-medium disabled:opacity-50"
                 >
-                  📞 Dispatcher
+                  📞 {t('roles.dispatcher')}
                 </button>
                 <button
                   onClick={() => handleQuickLogin('admin')}
                   disabled={authLoading}
                   className="px-3 py-2 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition text-xs font-medium disabled:opacity-50"
                 >
-                  ⚙️ Admin
+                  ⚙️ {t('roles.admin')}
                 </button>
                 <button
                   onClick={() => handleQuickLogin('super_admin')}
                   disabled={authLoading}
                   className="col-span-2 px-3 py-2 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition text-xs font-medium disabled:opacity-50"
                 >
-                  👑 Super Admin
+                  👑 {t('roles.superAdmin')}
                 </button>
               </div>
               <p className="text-xs text-slate-500 mt-2 text-center">One-click login with seed accounts</p>
@@ -1060,7 +1100,7 @@ function App() {
       <aside className="w-64 min-h-screen bg-slate-900 border-r border-slate-800 p-4 flex flex-col gap-2">
         <div className="flex items-center gap-3 text-purple-300 mb-6 px-2">
           <Car className="h-7 w-7" />
-          <span className="text-sm uppercase tracking-[0.2em] font-semibold">DGDS CLONE</span>
+          <span className="text-sm uppercase tracking-[0.2em] font-semibold">{t('app.title')}</span>
         </div>
         
         {/* Quick Actions */}
@@ -1075,7 +1115,7 @@ function App() {
             }`}
           >
             <Plus className="h-4 w-4" />
-            New Booking
+            {t('nav.booking')}
           </button>
           <button
             onClick={() => setView('addDriver')}
@@ -1086,7 +1126,7 @@ function App() {
             }`}
           >
             <Plus className="h-4 w-4" />
-            Add Driver
+            {t('nav.addDriver')}
           </button>
           <button
             onClick={() => {
@@ -1096,7 +1136,7 @@ function App() {
             className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition mt-1 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20"
           >
             <Plus className="h-4 w-4" />
-            Add Dispatcher
+            {t('nav.addDispatcher')}
           </button>
           <button
             onClick={() => setView('register')}
@@ -1107,7 +1147,7 @@ function App() {
             }`}
           >
             <Plus className="h-4 w-4" />
-            Add Customer
+            {t('nav.register')}
           </button>
         </div>
         
@@ -1123,7 +1163,7 @@ function App() {
             }`}
           >
             <Users className="h-4 w-4" />
-            Customers
+            {t('nav.customers')}
           </button>
           <button
             onClick={() => setView('trips')}
@@ -1134,7 +1174,7 @@ function App() {
             }`}
           >
             <Calendar className="h-4 w-4" />
-            Trips
+            {t('nav.trips')}
           </button>
           <button
             onClick={() => setView('drivers')}
@@ -1145,7 +1185,7 @@ function App() {
             }`}
           >
             <Car className="h-4 w-4" />
-            Drivers
+            {t('nav.drivers')}
           </button>
           <button
             onClick={() => setView('dispatchers')}
@@ -1156,7 +1196,7 @@ function App() {
             }`}
           >
             <Phone className="h-4 w-4" />
-            Dispatchers
+            {t('nav.dispatchers')}
           </button>
           <button
             onClick={() => setView('vehicles')}
@@ -1167,7 +1207,7 @@ function App() {
             }`}
           >
             <Truck className="h-4 w-4" />
-            Vehicles
+            {t('nav.vehicles')}
           </button>
           <button
             onClick={() => setView('summary')}
@@ -1178,7 +1218,7 @@ function App() {
             }`}
           >
             <DollarSign className="h-4 w-4" />
-            Summary
+            {t('nav.summary')}
           </button>
           <button
             onClick={() => setView('analytics')}
@@ -1189,7 +1229,7 @@ function App() {
             }`}
           >
             <DollarSign className="h-4 w-4" />
-            Analytics
+            {t('nav.analytics')}
           </button>
         </div>
         
@@ -1226,7 +1266,7 @@ function App() {
         {/* Stats at bottom */}
         <div className="border-t border-slate-800 pt-4 mt-4">
           <div className="grid grid-cols-2 gap-2">
-            {statCards.slice(0, 2).map((stat) => (
+            {statCards(t).slice(0, 2).map((stat) => (
               <div key={stat.label} className="rounded-xl bg-slate-800/50 p-2 text-center">
                 <p className="text-[10px] uppercase tracking-wider text-slate-500">{stat.label}</p>
                 <p className="text-sm font-bold text-white">{stat.value}</p>
@@ -1238,32 +1278,37 @@ function App() {
       
       {/* Main Content */}
       <div className="flex-1 p-6 overflow-auto">
-        <header className="mb-6">
-          <h1 className="text-3xl font-semibold text-white">
-            {view === 'register' && 'Customer Registration'}
-            {view === 'customers' && 'All Customers'}
-            {view === 'trips' && 'All Trips'}
-            {view === 'drivers' && 'All Drivers'}
-            {view === 'dispatchers' && 'All Dispatchers'}
-            {view === 'booking' && 'New Booking'}
-            {view === 'addDriver' && 'Add New Driver'}
-            {view === 'vehicles' && 'All Vehicles'}
-            {view === 'summary' && 'Financial Summary'}
-            {view === 'analytics' && 'Reports & Analytics'}
-          </h1>
-          <p className="mt-1 text-slate-400 text-sm">
-            {view === 'register' && 'Capture customer master data before dispatchers start live bookings.'}
-            {view === 'customers' && 'View and manage all registered customers.'}
-            {view === 'trips' && 'Track all trips and their statuses.'}
-            {view === 'drivers' && 'Manage driver information and availability.'}
-            {view === 'dispatchers' && 'Manage dispatcher accounts and assignments.'}
+        <header className="mb-6 flex justify-between items-start">
+          <div>
+            <h1 className="text-3xl font-semibold text-white">
+              {view === 'register' && t('nav.register')}
+              {view === 'customers' && t('customer.title')}
+              {view === 'trips' && t('trip.title')}
+              {view === 'drivers' && t('driver.title')}
+              {view === 'dispatchers' && t('nav.dispatchers')}
+              {view === 'booking' && t('nav.booking')}
+              {view === 'addDriver' && t('nav.addDriver')}
+              {view === 'vehicles' && t('nav.vehicles')}
+              {view === 'summary' && t('nav.summary')}
+              {view === 'analytics' && t('reports.title')}
+            </h1>
+            <p className="mt-1 text-slate-400 text-sm">
+              {view === 'register' && 'Capture customer master data before dispatchers start live bookings.'}
+              {view === 'customers' && 'View and manage all registered customers.'}
+              {view === 'trips' && 'Track all trips and their statuses.'}
+              {view === 'drivers' && 'Manage driver information and availability.'}
+              {view === 'dispatchers' && 'Manage dispatcher accounts and assignments.'}
             {view === 'booking' && 'Create a new booking for a customer.'}
             {view === 'addDriver' && 'Register a new driver in the system.'}
             {view === 'vehicles' && 'Manage customer vehicles for bookings.'}
             {view === 'analytics' && 'Generate comprehensive reports with commission breakdown.'}
             {view === 'summary' && 'View financial reports and commission breakdowns.'}
           </p>
-        </header>
+        </div>
+        
+        {/* Language Switcher in Header */}
+        <LanguageSwitcher />
+      </header>
 
         {view === 'register' && (
           <>
@@ -1769,6 +1814,13 @@ function App() {
                         </p>
                       </div>
                       <div className="flex gap-2">
+                        <button 
+                          onClick={() => setShareBooking(trip)}
+                          className="rounded-xl bg-green-500/10 px-3 py-1 text-sm text-green-300 transition hover:bg-green-500/20 flex items-center gap-1"
+                        >
+                          <Share2 className="h-4 w-4" />
+                          Share
+                        </button>
                         <button 
                           onClick={() => setSelectedTrip(trip)}
                           className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
@@ -2292,6 +2344,14 @@ function App() {
                       return_location: bookingForm.return_location || null,
                       ride_duration_hours: parseInt(bookingForm.ride_duration_hours),
                       payment_method: bookingForm.payment_method,
+                      // Include expense fields
+                      food_bill: parseFloat(bookingForm.food_bill) || 0,
+                      outstation_bill: parseFloat(bookingForm.outstation_bill) || 0,
+                      toll_fees: parseFloat(bookingForm.toll_fees) || 0,
+                      accommodation_bill: parseFloat(bookingForm.accommodation_bill) || 0,
+                      late_fine: parseFloat(bookingForm.late_fine) || 0,
+                      pickup_location_fare: parseFloat(bookingForm.pickup_location_fare) || 0,
+                      accommodation_included: bookingForm.accommodation_included,
                     });
                     setSubmitStatus(`Booking created: ${response.data.transaction_number}`);
                     setBookingForm({
@@ -2304,6 +2364,13 @@ function App() {
                       return_location: '',
                       ride_duration_hours: 4,
                       payment_method: 'RAZORPAY',
+                      food_bill: 0,
+                      outstation_bill: 0,
+                      toll_fees: 0,
+                      accommodation_bill: 0,
+                      late_fine: 0,
+                      pickup_location_fare: 0,
+                      accommodation_included: false,
                     });
                   } catch (err) {
                     setSubmitStatus(`Error: ${err.response?.data?.detail || 'Booking failed'}`);
@@ -2424,6 +2491,95 @@ function App() {
                     </select>
                   </label>
                 </div>
+
+                {/* Expense Details Section */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  <h3 className="text-sm font-semibold text-white mb-4">Expense Details (Optional)</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="space-y-2 text-sm">
+                      <span className="text-slate-300">Food Bill</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={bookingForm.food_bill}
+                        onChange={(e) => setBookingForm(prev => ({ ...prev, food_bill: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                        placeholder="0.00"
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm">
+                      <span className="text-slate-300">Outstation Bill</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={bookingForm.outstation_bill}
+                        onChange={(e) => setBookingForm(prev => ({ ...prev, outstation_bill: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                        placeholder="0.00"
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm">
+                      <span className="text-slate-300">Toll Fees</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={bookingForm.toll_fees}
+                        onChange={(e) => setBookingForm(prev => ({ ...prev, toll_fees: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                        placeholder="0.00"
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm">
+                      <span className="text-slate-300">Accommodation Bill</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={bookingForm.accommodation_bill}
+                        onChange={(e) => setBookingForm(prev => ({ ...prev, accommodation_bill: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                        placeholder="0.00"
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm">
+                      <span className="text-slate-300">Late Fine</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={bookingForm.late_fine}
+                        onChange={(e) => setBookingForm(prev => ({ ...prev, late_fine: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                        placeholder="0.00"
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm">
+                      <span className="text-slate-300">Pickup Location Fare (Auto Rickshaw)</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={bookingForm.pickup_location_fare}
+                        onChange={(e) => setBookingForm(prev => ({ ...prev, pickup_location_fare: e.target.value }))}
+                        className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                        placeholder="0.00"
+                      />
+                    </label>
+                  </div>
+                  <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={bookingForm.accommodation_included}
+                      onChange={(e) => setBookingForm(prev => ({ ...prev, accommodation_included: e.target.checked }))}
+                      className="h-4 w-4 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    Accommodation Included
+                  </label>
+                </div>
+
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                   <p className="text-sm text-slate-400">Estimated Cost: ₹{bookingForm.ride_duration_hours * 400}</p>
                   <p className="text-xs text-slate-500">
@@ -2458,15 +2614,15 @@ function App() {
           <div className="space-y-6">
             {!selectedAnalyticsReport ? (
               <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
-                <h2 className="text-2xl font-semibold text-white mb-4">Reports & Analytics</h2>
-                <p className="text-slate-400 mb-6">Click on any card to view detailed drill-down reports</p>
+                <h2 className="text-2xl font-semibold text-white mb-4">{t('reports.title')}</h2>
+                <p className="text-slate-400 mb-6">{t('analytics.drillDown.clickToExpand')}</p>
                 
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   <div 
                     onClick={() => handleAnalyticsCardClick('overview')}
                     className="p-6 rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-purple-300 mb-2">📊 Analytics Overview</h3>
+                    <h3 className="text-lg font-semibold text-purple-300 mb-2">📊 {t('analytics.overview')}</h3>
                     <p className="text-sm text-slate-400">Platform-wide statistics and insights</p>
                   </div>
                   
@@ -2474,7 +2630,7 @@ function App() {
                     onClick={() => handleAnalyticsCardClick('driver')}
                     className="p-6 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-blue-300 mb-2">🚗 By Driver</h3>
+                    <h3 className="text-lg font-semibold text-blue-300 mb-2">🚗 {t('analytics.byDriver')}</h3>
                     <p className="text-sm text-slate-400">Driver earnings and performance</p>
                   </div>
                   
@@ -2482,7 +2638,7 @@ function App() {
                     onClick={() => handleAnalyticsCardClick('customer')}
                     className="p-6 rounded-xl border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-green-300 mb-2">👤 By Customer</h3>
+                    <h3 className="text-lg font-semibold text-green-300 mb-2">👤 {t('analytics.byCustomer')}</h3>
                     <p className="text-sm text-slate-400">Customer spending and bookings</p>
                   </div>
                   
@@ -2490,7 +2646,7 @@ function App() {
                     onClick={() => handleAnalyticsCardClick('vehicle')}
                     className="p-6 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-amber-300 mb-2">🚙 By Vehicle</h3>
+                    <h3 className="text-lg font-semibold text-amber-300 mb-2">🚙 {t('analytics.byVehicle')}</h3>
                     <p className="text-sm text-slate-400">Vehicle usage and revenue</p>
                   </div>
                   
@@ -2498,7 +2654,7 @@ function App() {
                     onClick={() => handleAnalyticsCardClick('dispatcher')}
                     className="p-6 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-cyan-300 mb-2">📞 By Dispatcher</h3>
+                    <h3 className="text-lg font-semibold text-cyan-300 mb-2">📞 {t('analytics.byDispatcher')}</h3>
                     <p className="text-sm text-slate-400">Dispatcher commission breakdown</p>
                   </div>
                   
@@ -2506,7 +2662,7 @@ function App() {
                     onClick={() => handleAnalyticsCardClick('transaction')}
                     className="p-6 rounded-xl border border-pink-500/30 bg-pink-500/10 hover:bg-pink-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-pink-300 mb-2">💰 By Transaction</h3>
+                    <h3 className="text-lg font-semibold text-pink-300 mb-2">💰 {t('analytics.byTransaction')}</h3>
                     <p className="text-sm text-slate-400">Transaction-level details</p>
                   </div>
 
@@ -2514,7 +2670,7 @@ function App() {
                     onClick={() => handleAnalyticsCardClick('admin')}
                     className="p-6 rounded-xl border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-orange-300 mb-2">⚙️ By Admin</h3>
+                    <h3 className="text-lg font-semibold text-orange-300 mb-2">⚙️ {t('analytics.byAdmin')}</h3>
                     <p className="text-sm text-slate-400">Admin commission breakdown</p>
                   </div>
 
@@ -2522,7 +2678,7 @@ function App() {
                     onClick={() => handleAnalyticsCardClick('super_admin')}
                     className="p-6 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
-                    <h3 className="text-lg font-semibold text-red-300 mb-2">👑 By Super Admin</h3>
+                    <h3 className="text-lg font-semibold text-red-300 mb-2">👑 {t('analytics.bySuperAdmin')}</h3>
                     <p className="text-sm text-slate-400">Super admin commission breakdown</p>
                   </div>
                 </div>
@@ -2790,7 +2946,7 @@ function App() {
                                           <p className="text-xs text-slate-400">ID: {driver.driver_id} • Joined: {driver.driver_created_at ? new Date(driver.driver_created_at).toLocaleDateString() : 'N/A'}</p>
                                         </div>
                                       </div>
-                                      <div className="grid grid-cols-4 gap-4 text-center">
+                                      <div className="grid grid-cols-5 gap-4 text-center">
                                         <div>
                                           <p className="text-xs text-slate-400">Revenue</p>
                                           <p className="text-emerald-300 font-semibold">₹{(driver.total_revenue_generated || 0).toLocaleString()}</p>
@@ -2810,6 +2966,17 @@ function App() {
                                             <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-300">{driver.partially_paid_transactions || 0}</span>
                                             <span className="px-2 py-0.5 rounded text-xs bg-red-500/20 text-red-300">{driver.unpaid_transactions || 0}</span>
                                           </div>
+                                        </div>
+                                        <div>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              fetchDriverRevenueBreakdown(driver.driver_id);
+                                            }}
+                                            className="px-3 py-1 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition text-xs font-medium"
+                                          >
+                                            View Breakdown
+                                          </button>
                                         </div>
                                       </div>
                                     </div>
@@ -2955,6 +3122,208 @@ function App() {
                             </div>
                           </div>
                         </>
+                      )}
+
+                      {/* Driver Revenue Breakdown Modal/Section */}
+                      {selectedDriverForBreakdown && driverRevenueBreakdown && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                          <div className="bg-slate-900 rounded-2xl border border-slate-700 max-w-4xl w-full max-h-[90vh] overflow-auto">
+                            <div className="p-6 border-b border-slate-800">
+                              <div className="flex justify-between items-center">
+                                <h3 className="text-xl font-semibold text-white">
+                                  💰 Revenue Breakdown - {driverRevenueBreakdown.driver_name}
+                                </h3>
+                                <button
+                                  onClick={() => {
+                                    setSelectedDriverForBreakdown(null);
+                                    setDriverRevenueBreakdown(null);
+                                  }}
+                                  className="text-slate-400 hover:text-white transition"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                            
+                            <div className="p-6 space-y-6">
+                              {/* Total Revenue */}
+                              <div className="bg-slate-800/50 rounded-xl p-4">
+                                <h4 className="text-lg font-semibold text-white mb-2">Total Revenue</h4>
+                                <p className="text-3xl font-bold text-emerald-400">
+                                  ₹{driverRevenueBreakdown.total_revenue.toLocaleString()}
+                                </p>
+                                <p className="text-sm text-slate-400 mt-1">
+                                  From {driverRevenueBreakdown.transaction_count} transactions
+                                </p>
+                              </div>
+
+                              {/* Revenue Breakdown Grid */}
+                              <div className="grid md:grid-cols-2 gap-6">
+                                {/* Driver Share */}
+                                <div className="bg-slate-800/50 rounded-xl p-4">
+                                  <h5 className="text-sm font-semibold text-white mb-3">Driver Share</h5>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-2xl font-bold text-green-400">
+                                      ₹{driverRevenueBreakdown.breakdown.driver_share.amount.toLocaleString()}
+                                    </span>
+                                    <span className="text-sm text-slate-400">
+                                      {driverRevenueBreakdown.breakdown.driver_share.percentage}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Net Take Home */}
+                                <div className="bg-slate-800/50 rounded-xl p-4">
+                                  <h5 className="text-sm font-semibold text-white mb-3">Net Take Home</h5>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-2xl font-bold text-blue-400">
+                                      ₹{driverRevenueBreakdown.breakdown.net_take_home.toLocaleString()}
+                                    </span>
+                                    <span className="text-sm text-slate-400">
+                                      After expenses
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Expenses Section */}
+                              <div className="bg-slate-800/50 rounded-xl p-4">
+                                <h5 className="text-sm font-semibold text-white mb-3">Expenses</h5>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Food Bill:</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.expenses.food_bill.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Outstation Bill:</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.expenses.outstation_bill.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Toll Fees:</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.expenses.toll_fees.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Accommodation Bill:</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.expenses.accommodation_bill.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Late Fine:</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.expenses.late_fine.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Pickup Location Fare:</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.expenses.pickup_location_fare.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  {driverRevenueBreakdown.breakdown.expenses.accommodation_included && (
+                                    <div className="flex justify-between text-green-400">
+                                      <span>Accommodation:</span>
+                                      <span className="font-medium">Included</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Registration Fee Section */}
+                              <div className="bg-slate-800/50 rounded-xl p-4">
+                                <h5 className="text-sm font-semibold text-white mb-3">Registration Fee</h5>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Registration Fee:</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.registration_fee.amount.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Status:</span>
+                                    <span className={`font-medium ${driverRevenueBreakdown.breakdown.registration_fee.paid ? 'text-green-400' : 'text-red-400'}`}>
+                                      {driverRevenueBreakdown.breakdown.registration_fee.paid ? 'Paid' : 'Unpaid'}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Deducted:</span>
+                                    <span className={`font-medium ${driverRevenueBreakdown.breakdown.registration_fee.deducted ? 'text-green-400' : 'text-orange-400'}`}>
+                                      {driverRevenueBreakdown.breakdown.registration_fee.deducted ? 'Yes' : 'No'}
+                                    </span>
+                                  </div>
+                                  {driverRevenueBreakdown.breakdown.registration_fee.paid && driverRevenueBreakdown.breakdown.registration_fee.paid_at && (
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-300">Paid On:</span>
+                                      <span className="text-white font-medium">
+                                        {new Date(driverRevenueBreakdown.breakdown.registration_fee.paid_at).toLocaleDateString()}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {!driverRevenueBreakdown.breakdown.registration_fee.deducted && (
+                                    <div className="flex justify-between text-yellow-400">
+                                      <span>One-time Deduction:</span>
+                                      <span className="font-medium">
+                                        ₹{driverRevenueBreakdown.breakdown.registration_fee.deduction.toLocaleString()}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                                {!driverRevenueBreakdown.breakdown.registration_fee.paid && user?.role === 'admin' && (
+                                  <button
+                                    onClick={() => {
+                                      // Handle registration fee payment
+                                      if (confirm(`Mark registration fee of ₹${driverRevenueBreakdown.breakdown.registration_fee.amount} as paid for ${driverRevenueBreakdown.driver_name}?`)) {
+                                        api.post(`/api/drivers/${driverRevenueBreakdown.driver_id}/pay-registration-fee`, {
+                                          payment_id: `manual_${Date.now()}`
+                                        }).then(() => {
+                                          alert('Registration fee marked as paid!');
+                                          // Refresh the breakdown
+                                          fetchDriverRevenueBreakdown(driverRevenueBreakdown.driver_id);
+                                        }).catch(err => {
+                                          alert('Failed to mark registration fee as paid: ' + (err.response?.data?.detail || err.message));
+                                        });
+                                      }
+                                    }}
+                                    className="mt-3 w-full px-4 py-2 rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition text-sm font-medium"
+                                  >
+                                    Mark Registration Fee as Paid
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Commission Breakdown */}
+                              <div className="bg-slate-800/50 rounded-xl p-4">
+                                <h5 className="text-sm font-semibold text-white mb-3">Platform Commissions</h5>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Super Admin (1%):</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.commissions.super_admin.amount.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Dispatcher (18%):</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.commissions.dispatcher.amount.toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-300">Admin (2%):</span>
+                                    <span className="text-white font-medium">
+                                      ₹{driverRevenueBreakdown.breakdown.commissions.admin.amount.toLocaleString()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       )}
 
                       {/* Generic data display for other report types */}
@@ -4807,6 +5176,17 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Booking Share Modal */}
+      {shareBooking && (
+        <BookingShareModal
+          booking={shareBooking}
+          onClose={() => setShareBooking(null)}
+          driver={shareBooking.driver}
+          customer={shareBooking.customer}
+          vehicle={shareBooking.vehicle}
+        />
+      )}
     </div>
   );
 }

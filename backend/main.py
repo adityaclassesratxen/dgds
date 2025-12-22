@@ -1810,6 +1810,24 @@ async def get_driver_registration_timeline(
 # ANALYTICS OVERVIEW AND OTHER REPORTS
 # ============================================================================
 
+@app.get("/api/analytics/drivers/{driver_id}/revenue-breakdown")
+@limiter.limit("30/minute")
+async def get_driver_revenue_breakdown(
+    request: Request,
+    driver_id: int,
+    time_filter: str = "all",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """
+    Get detailed revenue breakdown for a specific driver
+    Includes all expenses and commission splits
+    """
+    from reports import get_driver_revenue_breakdown
+    return get_driver_revenue_breakdown(db, driver_id, time_filter, tenant_filter)
+
+
 @app.post("/api/reports/analytics")
 @limiter.limit("20/minute")
 async def get_analytics_overview(
@@ -1840,6 +1858,48 @@ async def get_transaction_report(
     if tenant_filter is not None:
         filters.tenant_id = tenant_filter
     return generate_transaction_report(db, filters)
+
+
+@app.post("/api/drivers/{driver_id}/pay-registration-fee")
+@limiter.limit("30/minute")
+async def pay_driver_registration_fee(
+    request: Request,
+    driver_id: int,
+    payment_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    """
+    Mark driver registration fee as paid
+    """
+    if current_user.role not in ["admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only admins can mark registration fees as paid")
+    
+    driver = db.query(Driver).filter(Driver.id == driver_id).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    if tenant_filter is not None and driver.tenant_id != tenant_filter:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if driver.registration_fee_paid:
+        raise HTTPException(status_code=400, detail="Registration fee already paid")
+    
+    # Update driver registration fee status
+    driver.registration_fee_paid = True
+    driver.registration_fee_paid_at = datetime.now()
+    driver.registration_fee_payment_id = payment_data.get("payment_id", "manual")
+    
+    db.commit()
+    db.refresh(driver)
+    
+    return {
+        "message": "Registration fee marked as paid",
+        "driver_id": driver.id,
+        "fee_amount": float(driver.registration_fee_amount),
+        "paid_at": driver.registration_fee_paid_at.isoformat()
+    }
 
 
 @app.post("/api/reports/vehicles")

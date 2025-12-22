@@ -170,6 +170,13 @@ class Driver(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
+    # Registration fee fields
+    registration_fee_amount = Column(Numeric(10, 2), default=500, nullable=False)  # Default ₹500
+    registration_fee_paid = Column(Boolean, default=False, nullable=False)
+    registration_fee_paid_at = Column(DateTime(timezone=True), nullable=True)
+    registration_fee_payment_id = Column(String(100), nullable=True)
+    registration_fee_deducted = Column(Boolean, default=False, nullable=False)  # Track if deducted from earnings
+    
     # Foreign key relationships
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True)
     
@@ -331,6 +338,16 @@ class RideTransaction(Base):
     )
     is_paid = Column(Boolean, default=False, nullable=False)
     paid_amount = Column(Numeric(10, 2), default=0, nullable=False)
+    
+    # Driver expense breakdown fields
+    food_bill = Column(Numeric(10, 2), default=0, nullable=True)
+    outstation_bill = Column(Numeric(10, 2), default=0, nullable=True)
+    toll_fees = Column(Numeric(10, 2), default=0, nullable=True)
+    accommodation_bill = Column(Numeric(10, 2), default=0, nullable=True)
+    late_fine = Column(Numeric(10, 2), default=0, nullable=True)
+    pickup_location_fare = Column(Numeric(10, 2), default=0, nullable=True)
+    accommodation_included = Column(Boolean, default=False, nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

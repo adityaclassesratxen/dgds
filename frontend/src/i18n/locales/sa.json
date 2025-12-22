@@ -211,5 +211,78 @@
     "paymentSuccessful": "भुगतानं सफलम्",
     "uploadFailed": "अपलोड् विफलम्",
     "messageFailed": "सन्देशः विफलः"
+  },
+  "analytics": {
+    "title": "विश्लेषणम्",
+    "overview": "विश्लेषण सारांशः",
+    "byDriver": "चालकेन सह",
+    "byCustomer": "ग्राहकेन सह",
+    "byDispatcher": "प्रेषकेन सह",
+    "byAdmin": "व्यवस्थापकेन सह",
+    "bySuperAdmin": "महाव्यवस्थापकेन सह",
+    "byTransaction": "लेनदेनेन सह",
+    "byVehicle": "वाहनेन सह",
+    "timeFilter": {
+      "title": "कालः",
+      "1day": "१ दिनम्",
+      "7days": "७ दिनानि",
+      "14days": "१४ दिनानि",
+      "30days": "३० दिनानि",
+      "1month": "१ मासः",
+      "3months": "३ मासाः",
+      "6months": "६ मासाः",
+      "1year": "१ वर्षम्",
+      "5years": "५ वर्षाणि",
+      "6years": "६ वर्षाणि",
+      "all": "सर्वकालम्"
+    },
+    "summary": {
+      "totalRevenue": "सकल आयः",
+      "totalBookings": "सकल बुकिंग्स्",
+      "totalCommission": "सकल कमीशन्",
+      "commissionEarned": "कमीशन् अर्जितम्",
+      "commissionPaid": "कमीशन् भुगतानम्",
+      "commissionPending": "कमीशन् लम्बितम्",
+      "fullyPaidTransactions": "पूर्णतया भुगतानम्",
+      "partiallyPaidTransactions": "आंशिकरूपेण भुगतानम्",
+      "unpaidTransactions": "अभुगतानितानि",
+      "totalDrivers": "सकल चालकाः",
+      "totalCustomers": "सकल ग्राहकाः"
+    },
+    "charts": {
+      "commissionDistribution": "कमीशन् वितरणम्",
+      "paymentStatus": "भुगतान स्थितिः",
+      "driverRevenue": "चालकस्य आयः",
+      "customerSpending": "ग्राहकस्य व्ययः",
+      "vehicleUtilization": "वाहनस्य उपयोगः",
+      "dispatcherPerformance": "प्रेषकस्य प्रदर्शनम्"
+    },
+    "drillDown": {
+      "driverDetails": "चालकविवरणम् - पदानुक्रमितः ड्रिल-डाउन्",
+      "clickToExpand": "लेनदेनविवरणं भुगतानइतिहासं च द्रष्टुं कस्मिंश्चित् चालके क्लिक् कुरुतु",
+      "transactionHistory": "लेनदेनइतिहासः",
+      "trip": "यात्रा",
+      "paymentBreakdown": "भुगतानविवरणम्",
+      "commissionDetails": "कमीशन् विवरणम्",
+      "driverShare": "चालकस्य भागः",
+      "dispatcherShare": "प्रेषकस्य भागः",
+      "adminShare": "व्यवस्थापकस्य भागः",
+      "superAdminShare": "महाव्यवस्थापकस्य भागः"
+    },
+    "noData": {
+      "title": "कोऽपि दत्तांशः न उपलभ्यते",
+      "message": "चितितकालावध्याः कोऽपि अभिलेखः न प्राप्तः।",
+      "tips": {
+        "title": "उपायाः:",
+        "createBookings": "\"नूतनं बुकिंग्\" उपयुज्य कतिचित् बुकिंग्स् सृजतु",
+        "selectAllTime": "कालावधिरूपेण \"सर्वकालम्\" चिनुतु",
+        "checkPermissions": "यदि त्वयि आवश्यकानि अनुमत्यनि सन्ति इति परीक्षतु",
+        "verifyTransactions": "प्रणाल्यां लेनदेनानि सन्ति इति सत्यापयतु"
+      }
+    },
+    "error": {
+      "title": "विश्लेषणं लोड् कर्तुं त्रुटिः",
+      "retry": "पुनः प्रयत्नं कुरुतु"
+    }
   }
 }

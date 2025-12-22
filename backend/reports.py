@@ -677,3 +677,134 @@ def generate_transaction_report(db: Session, filters: ReportFilters):
         },
         'transactions': transaction_details,
     }
+
+
+def get_driver_revenue_breakdown(db: Session, driver_id: int, time_filter: str = "all", tenant_filter: Optional[int] = None):
+    """
+    Get detailed revenue breakdown for a specific driver
+    Includes all expenses and commission splits
+    """
+    # Build date filter
+    date_filter = None
+    if time_filter == "today":
+        date_filter = func.date(RideTransaction.created_at) == datetime.now().date()
+    elif time_filter == "week":
+        date_filter = RideTransaction.created_at >= datetime.now() - timedelta(days=7)
+    elif time_filter == "month":
+        date_filter = RideTransaction.created_at >= datetime.now() - timedelta(days=30)
+    elif time_filter == "year":
+        date_filter = RideTransaction.created_at >= datetime.now() - timedelta(days=365)
+    
+    # Build query
+    query = db.query(RideTransaction).filter(RideTransaction.driver_id == driver_id)
+    
+    if date_filter:
+        query = query.filter(date_filter)
+    
+    if tenant_filter is not None:
+        query = query.filter(RideTransaction.tenant_id == tenant_filter)
+    
+    transactions = query.all()
+    
+    if not transactions:
+        return {
+            "driver_id": driver_id,
+            "driver_name": "N/A",
+            "total_revenue": 0,
+            "breakdown": {
+                "total_revenue": 0,
+                "driver_share": {"amount": 0, "percentage": "79%"},
+                "expenses": {
+                    "food_bill": 0,
+                    "outstation_bill": 0,
+                    "toll_fees": 0,
+                    "accommodation_bill": 0,
+                    "late_fine": 0,
+                    "pickup_location_fare": 0,
+                    "accommodation_included": False
+                },
+                "commissions": {
+                    "super_admin": {"amount": 0, "percentage": "1%"},
+                    "dispatcher": {"amount": 0, "percentage": "18%"},
+                    "admin": {"amount": 0, "percentage": "2%"}
+                },
+                "net_take_home": 0
+            },
+            "transaction_count": 0
+        }
+    
+    # Get driver name and registration fee info
+    driver = db.query(Driver).filter(Driver.id == driver_id).first()
+    driver_name = driver.name if driver else "N/A"
+    registration_fee_amount = float(driver.registration_fee_amount) if driver else 0
+    registration_fee_paid = driver.registration_fee_paid if driver else False
+    registration_fee_paid_at = driver.registration_fee_paid_at if driver else None
+    registration_fee_deducted = driver.registration_fee_deducted if driver else False
+    
+    # Calculate totals
+    total_revenue = sum(float(t.total_amount or 0) for t in transactions)
+    total_driver_share = sum(float(t.driver_share or 0) for t in transactions)
+    total_food_bill = sum(float(t.food_bill or 0) for t in transactions)
+    total_outstation_bill = sum(float(t.outstation_bill or 0) for t in transactions)
+    total_toll_fees = sum(float(t.toll_fees or 0) for t in transactions)
+    total_accommodation_bill = sum(float(t.accommodation_bill or 0) for t in transactions)
+    total_late_fine = sum(float(t.late_fine or 0) for t in transactions)
+    total_pickup_fare = sum(float(t.pickup_location_fare or 0) for t in transactions)
+    
+    # Calculate commissions
+    total_super_admin = sum(float(t.super_admin_share or 0) for t in transactions)
+    total_dispatcher = sum(float(t.dispatcher_share or 0) for t in transactions)
+    total_admin = sum(float(t.admin_share or 0) for t in transactions)
+    
+    # Check if any transaction has accommodation included
+    accommodation_included = any(t.accommodation_included for t in transactions)
+    
+    # Calculate net take-home (driver share minus expenses and registration fee if not yet deducted)
+    total_expenses = total_food_bill + total_outstation_bill + total_toll_fees + total_accommodation_bill + total_late_fine + total_pickup_fare
+    registration_fee_deduction = 0 if registration_fee_deducted else registration_fee_amount
+    net_take_home = total_driver_share - total_expenses - registration_fee_deduction
+    
+    return {
+        "driver_id": driver_id,
+        "driver_name": driver_name,
+        "total_revenue": round(total_revenue, 2),
+        "breakdown": {
+            "total_revenue": round(total_revenue, 2),
+            "driver_share": {
+                "amount": round(total_driver_share, 2),
+                "percentage": "79%"
+            },
+            "expenses": {
+                "food_bill": round(total_food_bill, 2),
+                "outstation_bill": round(total_outstation_bill, 2),
+                "toll_fees": round(total_toll_fees, 2),
+                "accommodation_bill": round(total_accommodation_bill, 2),
+                "late_fine": round(total_late_fine, 2),
+                "pickup_location_fare": round(total_pickup_fare, 2),
+                "accommodation_included": accommodation_included
+            },
+            "registration_fee": {
+                "amount": round(registration_fee_amount, 2),
+                "paid": registration_fee_paid,
+                "paid_at": registration_fee_paid_at.isoformat() if registration_fee_paid_at else None,
+                "deducted": registration_fee_deducted,
+                "deduction": round(registration_fee_deduction, 2)
+            },
+            "commissions": {
+                "super_admin": {
+                    "amount": round(total_super_admin, 2),
+                    "percentage": "1%"
+                },
+                "dispatcher": {
+                    "amount": round(total_dispatcher, 2),
+                    "percentage": "18%"
+                },
+                "admin": {
+                    "amount": round(total_admin, 2),
+                    "percentage": "2%"
+                }
+            },
+            "net_take_home": round(net_take_home, 2)
+        },
+        "transaction_count": len(transactions)
+    }
