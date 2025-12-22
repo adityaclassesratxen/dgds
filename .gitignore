@@ -1,9 +1,19 @@
 # Environment variables
+/backend/.env
 .env
+/backend/.env.example
+.env.example
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+/frontend/.env.local
+/frontend/.env.development.local
+/frontend/.env.test.local
+/frontend/.env.production.local
+/backend/.venv
+/backend/__pycache__
+/backend/*.pyc
 
 # Dependencies
 node_modules/
