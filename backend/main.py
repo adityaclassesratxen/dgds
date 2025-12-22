@@ -904,8 +904,10 @@ async def get_vehicles(
     db: Session = Depends(get_db),
     tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
-    query = db.query(CustomerVehicle)
-    query = apply_tenant_filter(query, CustomerVehicle, tenant_filter)
+    query = db.query(CustomerVehicle).join(Customer)
+    # Apply tenant filter through Customer relationship
+    if tenant_filter is not None:
+        query = query.filter(Customer.tenant_id == tenant_filter)
     if customer_id:
         query = query.filter(CustomerVehicle.customer_id == customer_id)
     vehicles = query.offset(skip).limit(limit).all()
