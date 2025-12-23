@@ -13,10 +13,10 @@ RUN npm cache clean --force && \
 COPY . .
 
 # Set environment variables
-ENV VITE_API_BASE_URL=http://host.docker.internal:2070
-ENV PORT=2050
+ENV VITE_API_BASE_URL=http://host.docker.internal:5001
+ENV PORT=3000
 
-EXPOSE 2050
+EXPOSE 3000
 
 # Start the development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "2050"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
