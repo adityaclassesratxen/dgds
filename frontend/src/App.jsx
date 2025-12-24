@@ -295,17 +295,9 @@ function App() {
   const [seedingStatus, setSeedingStatus] = useState(null);
   const [showSeedingModal, setShowSeedingModal] = useState(false);
 
-  // Fetch tenants for admin/super_admin users
+  // Fetch tenants for all authenticated users
   const fetchTenants = useCallback(async () => {
     if (!isAuthenticated || !currentUser) return;
-    
-    // Only fetch tenants for admin/super_admin users
-    if (!['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role)) {
-      // For non-admin users, clear any selected tenant
-      localStorage.removeItem('selected_tenant_id');
-      setSelectedTenant(null);
-      return;
-    }
     
     setTenantLoading(true);
     try {
@@ -319,8 +311,19 @@ function App() {
         if (tenant) {
           setSelectedTenant(tenant);
         } else {
-          // Clear invalid tenant selection
-          localStorage.removeItem('selected_tenant_id');
+          // Set DEMO as default tenant if saved tenant not found
+          const demoTenant = response.data.find(t => t.code === 'DEMO');
+          if (demoTenant) {
+            setSelectedTenant(demoTenant);
+            localStorage.setItem('selected_tenant_id', demoTenant.id.toString());
+          }
+        }
+      } else {
+        // No saved tenant - set DEMO as default for all users
+        const demoTenant = response.data.find(t => t.code === 'DEMO');
+        if (demoTenant) {
+          setSelectedTenant(demoTenant);
+          localStorage.setItem('selected_tenant_id', demoTenant.id.toString());
         }
       }
     } catch (error) {
@@ -1363,12 +1366,52 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex">
-      {/* Left Sidebar */}
-      <aside className="w-64 min-h-screen bg-slate-900 border-r border-slate-800 p-4 flex flex-col gap-2">
-        <div className="flex items-center gap-3 text-purple-300 mb-6 px-2">
+      {/* Left Sidebar - Fixed height with scrollable navigation */}
+      <aside className="w-64 h-screen bg-slate-900 border-r border-slate-800 p-4 flex flex-col sticky top-0">
+        <div className="flex items-center gap-3 text-purple-300 mb-4 px-2">
           <Car className="h-7 w-7" />
           <span className="text-sm uppercase tracking-[0.2em] font-semibold">{t('app.title')}</span>
         </div>
+        
+        {/* Tenant Selector - Available for all users */}
+        {currentUser && tenants.length > 0 && (
+          <div className="mb-4 pb-4 border-b border-slate-800">
+            <label className="block text-xs uppercase tracking-wider text-slate-500 px-2 mb-2">
+              🏢 Company / Tenant
+            </label>
+            <select
+              value={selectedTenant?.id || ''}
+              onChange={(e) => {
+                const tenant = tenants.find(t => t.id === parseInt(e.target.value));
+                handleTenantSelect(tenant);
+              }}
+              disabled={tenantLoading}
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm font-medium focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 disabled:opacity-50 transition"
+            >
+              {tenants.map((tenant) => (
+                <option key={tenant.id} value={tenant.id}>
+                  {tenant.name} ({tenant.code})
+                </option>
+              ))}
+            </select>
+            {selectedTenant && (
+              <div className="mt-2 px-2 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">
+                <p className="text-xs text-green-400 font-medium">
+                  ✓ Active: {selectedTenant.name}
+                </p>
+              </div>
+            )}
+            {/* Tenant Management - Super Admin Only */}
+            {currentUser.role === 'SUPER_ADMIN' && (
+              <button
+                onClick={() => setView('tenants')}
+                className="w-full mt-2 px-3 py-2 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-medium hover:bg-purple-500/20 transition"
+              >
+                ⚙️ Manage Tenants
+              </button>
+            )}
+          </div>
+        )}
         
         {/* Quick Actions */}
         <div className="mb-4">
@@ -1418,8 +1461,8 @@ function App() {
           </button>
         </div>
         
-        {/* Navigation */}
-        <div className="flex-1">
+        {/* Navigation - Scrollable section */}
+        <div className="flex-1 overflow-y-auto min-h-0">
           <p className="text-xs uppercase tracking-wider text-slate-500 px-2 mb-2">{t('sidebar.navigation')}</p>
           <button
             onClick={() => setView('customers')}
@@ -1509,34 +1552,6 @@ function App() {
               <p className="text-xs text-purple-300 mt-1">{currentUser.role}</p>
             </div>
             
-            {/* Tenant Selector - Admin/Super Admin Only */}
-            {['ADMIN', 'SUPER_ADMIN'].includes(currentUser.role) && (
-              <div className="mb-3">
-                <label className="block text-xs text-slate-400 mb-2">{t('sidebar.selectTenant')}</label>
-                <select
-                  value={selectedTenant?.id || ''}
-                  onChange={(e) => {
-                    const tenant = tenants.find(t => t.id === parseInt(e.target.value));
-                    handleTenantSelect(tenant);
-                  }}
-                  disabled={tenantLoading}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm focus:outline-none focus:border-purple-500 disabled:opacity-50"
-                >
-                  <option value="">{tenantLoading ? 'Loading...' : 'All Tenants'}</option>
-                  {tenants.map((tenant) => (
-                    <option key={tenant.id} value={tenant.id}>
-                      {tenant.name} ({tenant.code})
-                    </option>
-                  ))}
-                </select>
-                {selectedTenant && (
-                  <p className="text-xs text-green-400 mt-1">
-                    Active: {selectedTenant.name}
-                  </p>
-                )}
-              </div>
-            )}
-            
             {/* Seed Database Button - Admin Only */}
             {(currentUser.role === 'admin' || currentUser.role === 'super_admin') && (
               <button
@@ -1557,18 +1572,6 @@ function App() {
             </button>
           </div>
         )}
-        
-        {/* Stats at bottom */}
-        <div className="border-t border-slate-800 pt-4 mt-4">
-          <div className="grid grid-cols-2 gap-2">
-            {statCards(t).slice(0, 2).map((stat) => (
-              <div key={stat.label} className="rounded-xl bg-slate-800/50 p-2 text-center">
-                <p className="text-[10px] uppercase tracking-wider text-slate-500">{stat.label}</p>
-                <p className="text-sm font-bold text-white">{convertDigits(stat.value)}</p>
-              </div>
-            ))}
-          </div>
-        </div>
       </aside>
       
       {/* Main Content */}
@@ -1586,24 +1589,34 @@ function App() {
               {view === 'vehicles' && t('nav.vehicles')}
               {view === 'summary' && t('nav.summary')}
               {view === 'analytics' && t('reports.title')}
+              {view === 'tenants' && 'Tenant Management'}
             </h1>
-            <p className="mt-1 text-slate-400 text-sm">
-              {view === 'register' && t('pageDescriptions.register')}
-              {view === 'customers' && t('pageDescriptions.customers')}
-              {view === 'trips' && t('pageDescriptions.trips')}
-              {view === 'drivers' && t('pageDescriptions.drivers')}
-              {view === 'dispatchers' && t('pageDescriptions.dispatchers')}
-              {view === 'booking' && t('pageDescriptions.booking')}
-              {view === 'addDriver' && t('pageDescriptions.addDriver')}
-              {view === 'vehicles' && t('pageDescriptions.vehicles')}
-              {view === 'analytics' && t('pageDescriptions.analytics')}
-              {view === 'summary' && t('pageDescriptions.summary')}
-            </p>
-        </div>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-slate-400 text-sm">
+                {view === 'register' && t('pageDescriptions.register')}
+                {view === 'customers' && t('pageDescriptions.customers')}
+                {view === 'trips' && t('pageDescriptions.trips')}
+                {view === 'drivers' && t('pageDescriptions.drivers')}
+                {view === 'dispatchers' && t('pageDescriptions.dispatchers')}
+                {view === 'booking' && t('pageDescriptions.booking')}
+                {view === 'addDriver' && t('pageDescriptions.addDriver')}
+                {view === 'vehicles' && t('pageDescriptions.vehicles')}
+                {view === 'analytics' && t('pageDescriptions.analytics')}
+                {view === 'summary' && t('pageDescriptions.summary')}
+                {view === 'tenants' && 'Create and manage company tenants for different regions or businesses'}
+              </p>
+              {/* Active Tenant Indicator */}
+              {selectedTenant && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-xs font-medium text-purple-300">
+                  🏢 {selectedTenant.name}
+                </span>
+              )}
+            </div>
+          </div>
         
-        {/* Language Switcher in Header */}
-        <LanguageSwitcher />
-      </header>
+          {/* Language Switcher in Header */}
+          <LanguageSwitcher />
+        </header>
 
         {view === 'register' && (
           <>
@@ -5517,6 +5530,138 @@ function App() {
                 </div>
               )}
               <button onClick={() => { setSelectedDispatcher(null); setEditMode(null); }} className="mt-4 w-full py-2 rounded-xl bg-slate-800 text-slate-300">Close</button>
+            </div>
+          </div>
+        )}
+
+        {/* Tenant Management View - Super Admin Only */}
+        {view === 'tenants' && currentUser?.role === 'SUPER_ADMIN' && (
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-semibold text-white">🏢 Tenant Management</h2>
+                <button
+                  onClick={() => setEditMode('create-tenant')}
+                  className="px-4 py-2 rounded-xl bg-purple-500 text-white font-medium hover:bg-purple-600 transition"
+                >
+                  + Add New Tenant
+                </button>
+              </div>
+
+              {/* Create New Tenant Form */}
+              {editMode === 'create-tenant' && (
+                <div className="mb-6 p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                  <h3 className="text-lg font-semibold text-white mb-4">Create New Tenant</h3>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.target);
+                    try {
+                      await api.post('/api/tenants/', {
+                        name: formData.get('name'),
+                        code: formData.get('code').toUpperCase(),
+                        description: formData.get('description')
+                      });
+                      setEditMode(null);
+                      fetchTenants();
+                      alert('Tenant created successfully!');
+                    } catch (error) {
+                      alert('Error creating tenant: ' + (error.response?.data?.detail || error.message));
+                    }
+                  }} className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block space-y-2">
+                        <span className="text-slate-300">Tenant Name *</span>
+                        <input 
+                          type="text" 
+                          name="name"
+                          placeholder="e.g., Mumbai Operations"
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" 
+                          required 
+                        />
+                      </label>
+                      <label className="block space-y-2">
+                        <span className="text-slate-300">Tenant Code * (unique)</span>
+                        <input 
+                          type="text" 
+                          name="code"
+                          placeholder="e.g., MUM"
+                          maxLength={10}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white uppercase" 
+                          required 
+                        />
+                      </label>
+                    </div>
+                    <label className="block space-y-2">
+                      <span className="text-slate-300">Description</span>
+                      <textarea 
+                        name="description"
+                        placeholder="Description of this tenant/company"
+                        rows={2}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" 
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      <button type="submit" className="flex-1 py-2 rounded-xl bg-purple-500 text-white font-semibold hover:bg-purple-600">Create Tenant</button>
+                      <button type="button" onClick={() => setEditMode(null)} className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700">Cancel</button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Tenant List */}
+              <div className="space-y-3">
+                {tenants.map((tenant) => (
+                  <div key={tenant.id} className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-semibold text-white">{tenant.name}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-xs font-medium">{tenant.code}</span>
+                        {tenant.code === 'DEMO' && (
+                          <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 text-xs font-medium">Default</span>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-400 mt-1">{tenant.description || 'No description'}</p>
+                      <p className="text-xs text-slate-500 mt-1">Created: {new Date(tenant.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {tenant.code !== 'DEMO' && tenant.code !== 'DGDS' && (
+                        <button
+                          onClick={async () => {
+                            if (confirm(`Are you sure you want to delete "${tenant.name}"?`)) {
+                              try {
+                                await api.delete(`/api/tenants/${tenant.id}`);
+                                fetchTenants();
+                                alert('Tenant deleted successfully!');
+                              } catch (error) {
+                                alert('Error deleting tenant: ' + (error.response?.data?.detail || error.message));
+                              }
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-300 text-sm hover:bg-red-500/20 transition"
+                        >
+                          Delete
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleTenantSelect(tenant)}
+                        className={`px-3 py-1.5 rounded-lg text-sm transition ${
+                          selectedTenant?.id === tenant.id
+                            ? 'bg-green-500 text-white'
+                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        {selectedTenant?.id === tenant.id ? '✓ Active' : 'Select'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {tenants.length === 0 && (
+                <div className="text-center py-8 text-slate-400">
+                  No tenants found. Click "Add New Tenant" to create one.
+                </div>
+              )}
             </div>
           </div>
         )}
