@@ -22,7 +22,8 @@ from models import (
     Customer, CustomerAddress, ContactNumber,
     Driver, DriverAddress, DriverContactNumber,
     Dispatcher, CustomerVehicle, RideTransaction,
-    PaymentTransaction, TransactionStatus, PaymentMethod, PaymentStatus
+    PaymentTransaction, TransactionStatus, PaymentMethod, PaymentStatus,
+    Tenant
 )
 
 # Sample data for realistic names and locations
@@ -97,6 +98,13 @@ def seed_database(progress_callback=None):
     try:
         report_progress("🌱 Starting database seeding...", 0)
         
+        # Get DEMO tenant for assigning all seeded data
+        demo_tenant = db.query(Tenant).filter(Tenant.code == "DEMO").first()
+        if not demo_tenant:
+            raise Exception("DEMO tenant not found. Please ensure tenants are seeded first.")
+        demo_tenant_id = demo_tenant.id
+        report_progress(f"📋 Using DEMO tenant (ID: {demo_tenant_id})", 5)
+        
         # Get timestamp for unique names
         timestamp = datetime.now().strftime("%H%M%S")
         
@@ -115,6 +123,7 @@ def seed_database(progress_callback=None):
                 name=name,
                 email=generate_email(name),
                 contact_number=generate_phone(),
+                tenant_id=demo_tenant_id,
                 created_at=random_date_in_range(start_date, end_date - timedelta(days=365))
             )
             db.add(dispatcher)
@@ -134,6 +143,7 @@ def seed_database(progress_callback=None):
             customer = Customer(
                 name=name,
                 email=generate_email(name),
+                tenant_id=demo_tenant_id,
                 created_at=random_date_in_range(start_date, end_date - timedelta(days=300))
             )
             db.add(customer)
@@ -175,6 +185,7 @@ def seed_database(progress_callback=None):
             
             driver = Driver(
                 name=name,
+                tenant_id=demo_tenant_id,
                 created_at=random_date_in_range(start_date, end_date - timedelta(days=200))
             )
             db.add(driver)
@@ -230,6 +241,7 @@ def seed_database(progress_callback=None):
                 additional_details=f"Color: {random.choice(['White', 'Black', 'Silver', 'Red', 'Blue', 'Grey'])}",
                 created_at=random_date_in_range(start_date, end_date - timedelta(days=100))
             )
+            # CustomerVehicle gets tenant_id through customer relationship
             db.add(vehicle)
             vehicles.append(vehicle)
         db.commit()
@@ -298,7 +310,7 @@ def seed_database(progress_callback=None):
                 status=status,
                 payment_method=random.choice(payment_methods),
                 is_paid=paid_amount >= total_amount,
-                tenant_id=None,  # Set to None so it works with users without tenant
+                tenant_id=demo_tenant_id,  # Assign to DEMO tenant
                 created_at=transaction_date,
                 updated_at=transaction_date + timedelta(hours=random.randint(1, 48))
             )

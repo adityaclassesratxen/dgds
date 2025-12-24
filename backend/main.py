@@ -1409,12 +1409,14 @@ async def summary_transactions(
     date_from: str = None,
     date_to: str = None,
     date_preset: str = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     from sqlalchemy import func as sqlfunc
     from datetime import datetime, timedelta
 
     query = db.query(RideTransaction)
+    query = apply_tenant_filter(query, RideTransaction, tenant_filter)
 
     if dispatcher_id:
         query = query.filter(RideTransaction.dispatcher_id == dispatcher_id)
@@ -1471,10 +1473,12 @@ async def list_transactions_filtered(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     from datetime import datetime, timedelta
 
     query = db.query(RideTransaction)
+    query = apply_tenant_filter(query, RideTransaction, tenant_filter)
 
     if dispatcher_id:
         query = query.filter(RideTransaction.dispatcher_id == dispatcher_id)
@@ -1530,10 +1534,12 @@ async def summary_by_transaction(
     customer_id: int = None,
     date_preset: str = None,
     db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     from datetime import datetime, timedelta
 
     query = db.query(RideTransaction)
+    query = apply_tenant_filter(query, RideTransaction, tenant_filter)
 
     if dispatcher_id:
         query = query.filter(RideTransaction.dispatcher_id == dispatcher_id)
@@ -1699,6 +1705,7 @@ async def summary_by_payment(
     payer_type: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     """Get payment settlement summary with details"""
     from sqlalchemy import func as sqlfunc
@@ -1706,6 +1713,10 @@ async def summary_by_payment(
     query = db.query(PaymentTransaction).join(
         RideTransaction, PaymentTransaction.ride_transaction_id == RideTransaction.id
     ).join(Customer, RideTransaction.customer_id == Customer.id, isouter=True)
+    
+    # Apply tenant filter through RideTransaction
+    if tenant_filter is not None:
+        query = query.filter(RideTransaction.tenant_id == tenant_filter)
     
     if payment_method:
         query = query.filter(PaymentTransaction.payment_method == payment_method)
@@ -1783,6 +1794,7 @@ async def summary_by_payment(
 async def driver_detailed_summary(
     driver_id: int,
     db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
 ):
     """Get detailed driver summary with registration, normal payments, waive offs, fines"""
     from sqlalchemy import func as sqlfunc
@@ -1794,12 +1806,20 @@ async def driver_detailed_summary(
     # Get all transactions for this driver
     transactions = db.query(RideTransaction).filter(
         RideTransaction.driver_id == driver_id
-    ).all()
+    )
+    # Apply tenant filter
+    if tenant_filter is not None:
+        transactions = transactions.filter(RideTransaction.tenant_id == tenant_filter)
+    transactions = transactions.all()
     
     # Get all payments for this driver's transactions
     payments = db.query(PaymentTransaction).join(
         RideTransaction, PaymentTransaction.ride_transaction_id == RideTransaction.id
-    ).filter(RideTransaction.driver_id == driver_id).all()
+    ).filter(RideTransaction.driver_id == driver_id)
+    # Apply tenant filter
+    if tenant_filter is not None:
+        payments = payments.filter(RideTransaction.tenant_id == tenant_filter)
+    payments = payments.all()
     
     # Calculate totals
     total_rides = len(transactions)
@@ -2301,7 +2321,7 @@ async def quick_login(request: Request, role: str, db: Session = Depends(get_db)
         # Other roles get assigned to DEMO tenant by default
         tenant_id = None
         if role != "super_admin":
-            demo_tenant = db.query(Tenant).filter(Tenant.code == "DEMO").first()
+            demo_tenant = db.query(Tenant).filter(Tenant.name == "DEMO").first()
             if demo_tenant:
                 tenant_id = demo_tenant.id
         
@@ -2654,7 +2674,7 @@ async def trigger_database_seeding(
     global seeding_status
     
     # Check if user is admin
-    if current_user.role not in ["admin", "super_admin"]:
+    if current_user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
         raise HTTPException(status_code=403, detail="Only admins can seed the database")
     
     # Check if seeding is already running
@@ -2710,7 +2730,7 @@ async def get_seeding_status(
     current_user: User = Depends(get_current_user)
 ):
     """Get current status of database seeding"""
-    if current_user.role not in ["admin", "super_admin"]:
+    if current_user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
         raise HTTPException(status_code=403, detail="Only admins can check seeding status")
     
     return seeding_status
