@@ -228,10 +228,8 @@ async def get_tenants(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all tenants - only accessible by ADMIN and SUPER_ADMIN"""
-    if current_user.role not in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    """Get all tenants - accessible by ALL authenticated users for tenant selection"""
+    # All users can view tenants to select which company/tenant they're working with
     tenants = db.query(Tenant).all()
     return [
         {
