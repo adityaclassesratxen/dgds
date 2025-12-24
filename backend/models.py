@@ -284,8 +284,10 @@ class TransactionStatus(str, Enum):
 
 class PaymentMethod(str, Enum):
     RAZORPAY = "RAZORPAY"
+    STRIPE = "STRIPE"
     PHONEPE = "PHONEPE"
     GOOGLEPAY = "GOOGLEPAY"
+    PAYTM = "PAYTM"
     UPI = "UPI"
     QR_CODE = "QR_CODE"
     CASH = "CASH"
@@ -390,6 +392,9 @@ class PaymentTransaction(Base):
     razorpay_order_id = Column(String(100), nullable=True)
     razorpay_payment_id = Column(String(100), nullable=True)
     razorpay_signature = Column(String(255), nullable=True)
+    stripe_payment_intent_id = Column(String(100), nullable=True)
+    stripe_payment_method_id = Column(String(100), nullable=True)
+    stripe_charge_id = Column(String(100), nullable=True)
     status = Column(
         SAEnum(PaymentStatus),
         default=PaymentStatus.PENDING,

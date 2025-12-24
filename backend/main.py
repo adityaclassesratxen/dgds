@@ -610,8 +610,15 @@ async def restore_customer(
 
 
 @app.get("/api/transactions/", response_model=list[BookingResponse])
-async def get_transactions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    transactions = db.query(RideTransaction).offset(skip).limit(limit).all()
+async def get_transactions(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db),
+    tenant_filter: Optional[int] = Depends(get_tenant_filter)
+):
+    query = db.query(RideTransaction)
+    query = apply_tenant_filter(query, RideTransaction, tenant_filter)
+    transactions = query.offset(skip).limit(limit).all()
     return transactions
 
 
@@ -2012,6 +2019,125 @@ async def get_payment_history(
     ]
 
 
+class StripePaymentIntentRequest(BaseModel):
+    transaction_id: int
+    amount: float
+    payment_method_types: list[str] = ["card", "link"]
+
+@app.post("/api/payments/stripe/create-payment-intent")
+async def create_stripe_payment_intent(
+    request: StripePaymentIntentRequest,
+    db: Session = Depends(get_db),
+):
+    import stripe
+    
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    
+    transaction = db.query(RideTransaction).filter(RideTransaction.id == request.transaction_id).first()
+    if not transaction:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    try:
+        payment_intent = stripe.PaymentIntent.create(
+            amount=int(request.amount * 100),
+            currency="inr",
+            payment_method_types=request.payment_method_types,
+            metadata={
+                "transaction_id": str(request.transaction_id),
+                "transaction_number": transaction.transaction_number
+            },
+            automatic_payment_methods={
+                "enabled": True,
+                "allow_redirects": "never"
+            }
+        )
+        
+        payment = PaymentTransaction(
+            ride_transaction_id=request.transaction_id,
+            payment_method=PaymentMethod.STRIPE,
+            amount=Decimal(str(request.amount)),
+            payer_type=PaymentPayerType.CUSTOMER,
+            stripe_payment_intent_id=payment_intent.id,
+            status=PaymentStatus.PENDING,
+        )
+        db.add(payment)
+        db.commit()
+        
+        return {
+            "client_secret": payment_intent.client_secret,
+            "payment_intent_id": payment_intent.id,
+            "payment_id": payment.id,
+            "publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create payment intent: {str(e)}")
+
+
+class StripeWebhookEvent(BaseModel):
+    type: str
+    data: dict
+
+@app.post("/api/payments/stripe/webhook")
+async def stripe_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    import stripe
+    
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, webhook_secret
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    
+    if event["type"] == "payment_intent.succeeded":
+        payment_intent = event["data"]["object"]
+        
+        payment = db.query(PaymentTransaction).filter(
+            PaymentTransaction.stripe_payment_intent_id == payment_intent["id"]
+        ).first()
+        
+        if payment:
+            payment.stripe_payment_method_id = payment_intent.get("payment_method")
+            payment.stripe_charge_id = payment_intent.get("charges", {}).get("data", [{}])[0].get("id")
+            payment.status = PaymentStatus.SUCCESS
+            
+            transaction = payment.ride_transaction
+            transaction.paid_amount += payment.amount
+            transaction.is_paid = transaction.paid_amount >= transaction.total_amount
+            
+            event = RideTransactionEvent(
+                transaction_id=transaction.id,
+                event="PAYMENT_VERIFIED",
+                description=f"Stripe payment verified. Payment Intent ID: {payment_intent['id']}",
+            )
+            db.add(event)
+            db.commit()
+    
+    elif event["type"] == "payment_intent.payment_failed":
+        payment_intent = event["data"]["object"]
+        
+        payment = db.query(PaymentTransaction).filter(
+            PaymentTransaction.stripe_payment_intent_id == payment_intent["id"]
+        ).first()
+        
+        if payment:
+            payment.status = PaymentStatus.FAILED
+            payment.notes = payment_intent.get("last_payment_error", {}).get("message", "Payment failed")
+            db.commit()
+    
+    return {"status": "success"}
+
+
 @app.get("/api/config")
 async def get_config():
     import os
@@ -2021,7 +2147,7 @@ async def get_config():
         "admin_commission_percent": int(os.getenv("ADMIN_COMMISSION_PERCENT", 20)),
         "dispatcher_commission_percent": int(os.getenv("DISPATCHER_COMMISSION_PERCENT", 2)),
         "super_admin_commission_percent": int(os.getenv("SUPER_ADMIN_COMMISSION_PERCENT", 3)),
-        "payment_methods": ["RAZORPAY", "PHONEPE", "CASH"],
+        "payment_methods": ["RAZORPAY", "STRIPE", "PHONEPE", "GOOGLEPAY", "PAYTM", "CASH"],
         "app_name": os.getenv("APP_NAME", "DGDS Clone"),
     }
 

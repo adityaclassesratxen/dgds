@@ -28,10 +28,12 @@ import {
 } from 'recharts';
 import LanguageSwitcher from './components/LanguageSwitcher';
 import BookingShareModal from './components/BookingShareModal';
+import StripePaymentModal from './components/StripePaymentModal';
 
 // API Configuration - Uses environment variable or falls back to localhost
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:2060';
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || '';
+const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '';
 
 // Axios instance with defaults
 const api = axios.create({
@@ -263,6 +265,8 @@ function App() {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [selectedBreakdown, setSelectedBreakdown] = useState(null); // 'customer', 'driver', 'dispatcher', 'admin', 'super_admin'
+  const [showStripeModal, setShowStripeModal] = useState(false);
+  const [stripePaymentData, setStripePaymentData] = useState(null);
   
   // Analytics state
   const [selectedAnalyticsReport, setSelectedAnalyticsReport] = useState(null); // 'driver', 'customer', 'dispatcher', 'admin', 'super_admin', 'transaction', 'vehicle', 'overview'
@@ -5302,6 +5306,21 @@ function App() {
                         )}
                       </button>
                       <button
+                        disabled={paymentLoading}
+                        onClick={() => {
+                          setStripePaymentData({
+                            amount: selectedTrip.total_amount,
+                            transactionId: selectedTrip.id,
+                            transactionNumber: selectedTrip.transaction_number
+                          });
+                          setShowStripeModal(true);
+                        }}
+                        className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg transition-all"
+                      >
+                        <CreditCard className="w-4 h-4" />
+                        Pay with Stripe (₹{selectedTrip.total_amount})
+                      </button>
+                      <button
                         onClick={async () => {
                           await api.patch(`/api/bookings/${selectedTrip.id}/payment?paid_amount=${selectedTrip.total_amount}&payment_method=CASH`);
                           const res = await api.get('/api/transactions/');
@@ -5751,6 +5770,29 @@ function App() {
           driver={shareBooking.driver}
           customer={shareBooking.customer}
           vehicle={shareBooking.vehicle}
+        />
+      )}
+
+      {/* Stripe Payment Modal */}
+      {showStripeModal && stripePaymentData && (
+        <StripePaymentModal
+          isOpen={showStripeModal}
+          onClose={() => {
+            setShowStripeModal(false);
+            setStripePaymentData(null);
+          }}
+          amount={stripePaymentData.amount}
+          transactionId={stripePaymentData.transactionId}
+          transactionNumber={stripePaymentData.transactionNumber}
+          stripePublishableKey={STRIPE_PUBLISHABLE_KEY}
+          onSuccess={async (paymentIntent) => {
+            alert('✅ Payment successful!');
+            const res = await api.get('/api/transactions/');
+            setTrips(res.data);
+            setSelectedTrip(null);
+            setShowStripeModal(false);
+            setStripePaymentData(null);
+          }}
         />
       )}
     </div>
