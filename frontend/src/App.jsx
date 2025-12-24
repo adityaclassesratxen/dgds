@@ -710,7 +710,7 @@ function App() {
     } else if (view === 'summary') {
       fetchSummaryData();
     }
-  }, [view]);
+  }, [view, selectedTenant]);
 
   const fetchSummaryData = useCallback(() => {
     setLoading(true);
