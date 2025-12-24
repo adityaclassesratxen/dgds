@@ -2372,6 +2372,83 @@ function App() {
           </div>
         )}
 
+        {view === 'addDispatcher' && (
+          <div className="rounded-3xl border border-purple-800 bg-slate-900/80 p-6 shadow-xl shadow-purple-500/10">
+            <h2 className="mb-6 text-2xl font-semibold text-white">{t('dispatcher.add')}</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setIsSubmitting(true);
+                setSubmitStatus('');
+                try {
+                  await api.post('/api/dispatchers/', {
+                    name: dispatcherForm.name,
+                    email: dispatcherForm.email,
+                    contact_number: dispatcherForm.contact_number,
+                  });
+                  setSubmitStatus('Dispatcher created successfully!');
+                  setDispatcherForm({ name: '', email: '', contact_number: '' });
+                  setTimeout(() => setView('dispatchers'), 1500);
+                } catch (err) {
+                  setSubmitStatus(`Error: ${err.response?.data?.detail || 'Dispatcher creation failed'}`);
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }}
+              className="space-y-4"
+            >
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-300">Dispatcher Name *</span>
+                  <input
+                    type="text"
+                    value={dispatcherForm.name}
+                    onChange={(e) => setDispatcherForm(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                    required
+                  />
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-300">Email Address *</span>
+                  <input
+                    type="email"
+                    value={dispatcherForm.email}
+                    onChange={(e) => setDispatcherForm(prev => ({ ...prev, email: e.target.value }))}
+                    className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                    required
+                  />
+                </label>
+              </div>
+              <label className="space-y-2 text-sm">
+                <span className="text-slate-300">Contact Number *</span>
+                <input
+                  type="tel"
+                  value={dispatcherForm.contact_number}
+                  onChange={(e) => setDispatcherForm(prev => ({ ...prev, contact_number: e.target.value }))}
+                  className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
+                  required
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full rounded-2xl bg-gradient-to-r from-purple-500 to-blue-500 px-6 py-4 text-lg font-semibold text-white shadow-lg transition hover:brightness-110 disabled:opacity-60"
+              >
+                {isSubmitting ? 'Creating Dispatcher...' : 'Create Dispatcher'}
+              </button>
+              {submitStatus && (
+                <div className={`rounded-2xl border px-4 py-3 text-center text-sm ${
+                  submitStatus.includes('Error')
+                    ? 'border-red-500/50 bg-red-500/10 text-red-200'
+                    : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+                }`}>
+                  {submitStatus}
+                </div>
+              )}
+            </form>
+          </div>
+        )}
+
         {view === 'drivers' && (
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-blue-500/10">
             <h2 className="mb-6 text-2xl font-semibold text-white">{t('driver.title')}</h2>
@@ -2456,10 +2533,7 @@ function App() {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-semibold text-white">{t('dispatcher.title')}</h2>
               <button
-                onClick={() => {
-                  setSelectedDispatcher({ name: '', email: '', contact_number: '' });
-                  setEditMode('create-dispatcher');
-                }}
+                onClick={() => setView('addDispatcher')}
                 className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-600"
               >
                 <Plus className="inline h-4 w-4 mr-2" />
@@ -5445,95 +5519,7 @@ function App() {
           </div>
         )}
 
-        {selectedDispatcher && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setSelectedDispatcher(null); setEditMode(null); }}>
-            <div className="bg-slate-900 rounded-3xl p-6 max-w-lg w-full mx-4 border border-slate-700" onClick={e => e.stopPropagation()}>
-              <h2 className="text-xl font-semibold text-white mb-4">
-                {editMode === 'create-dispatcher' ? 'Create Dispatcher' : 
-                 editMode === 'dispatcher' ? 'Edit Dispatcher' : 'Dispatcher Details'}
-              </h2>
-              {editMode === 'create-dispatcher' ? (
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  await api.post('/api/dispatchers/', selectedDispatcher);
-                  setSelectedDispatcher(null);
-                  setEditMode(null);
-                  const res = await api.get('/api/dispatchers/');
-                  setDispatchers(res.data);
-                }} className="space-y-4">
-                  <label className="block space-y-2">
-                    <span className="text-slate-300">Name</span>
-                    <input 
-                      type="text" 
-                      value={selectedDispatcher.name} 
-                      onChange={e => setSelectedDispatcher({...selectedDispatcher, name: e.target.value})} 
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" 
-                      required 
-                    />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="text-slate-300">Email</span>
-                    <input 
-                      type="email" 
-                      value={selectedDispatcher.email} 
-                      onChange={e => setSelectedDispatcher({...selectedDispatcher, email: e.target.value})} 
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" 
-                      required 
-                    />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="text-slate-300">Contact Number</span>
-                    <input 
-                      type="tel" 
-                      value={selectedDispatcher.contact_number} 
-                      onChange={e => setSelectedDispatcher({...selectedDispatcher, contact_number: e.target.value})} 
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" 
-                      required 
-                    />
-                  </label>
-                  <div className="flex gap-2">
-                    <button type="submit" className="flex-1 py-2 rounded-xl bg-purple-500 text-white font-semibold">Create</button>
-                    <button type="button" onClick={() => { setSelectedDispatcher(null); setEditMode(null); }} className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300">Cancel</button>
-                  </div>
-                </form>
-              ) : editMode === 'dispatcher' ? (
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  await api.put(`/api/dispatchers/${selectedDispatcher.id}`, { name: selectedDispatcher.name, email: selectedDispatcher.email, contact_number: selectedDispatcher.contact_number });
-                  setSelectedDispatcher(null);
-                  setEditMode(null);
-                  const res = await api.get('/api/dispatchers/');
-                  setDispatchers(res.data);
-                }} className="space-y-4">
-                  <label className="block space-y-2">
-                    <span className="text-slate-300">Name</span>
-                    <input type="text" value={selectedDispatcher.name} onChange={e => setSelectedDispatcher({...selectedDispatcher, name: e.target.value})} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="text-slate-300">Email</span>
-                    <input type="email" value={selectedDispatcher.email} onChange={e => setSelectedDispatcher({...selectedDispatcher, email: e.target.value})} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" />
-                  </label>
-                  <label className="block space-y-2">
-                    <span className="text-slate-300">Phone</span>
-                    <input type="tel" value={selectedDispatcher.contact_number} onChange={e => setSelectedDispatcher({...selectedDispatcher, contact_number: e.target.value})} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-white" />
-                  </label>
-                  <button type="submit" className="w-full py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-500">Save Changes</button>
-                </form>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-slate-300"><strong>ID:</strong> {selectedDispatcher.id}</p>
-                  <p className="text-slate-300"><strong>Name:</strong> {selectedDispatcher.name}</p>
-                  <p className="text-slate-300"><strong>Email:</strong> {selectedDispatcher.email}</p>
-                  <p className="text-slate-300"><strong>Phone:</strong> {selectedDispatcher.contact_number}</p>
-                  <p className="text-slate-300"><strong>Status:</strong> {selectedDispatcher.is_archived ? <span className="text-red-400">Archived</span> : <span className="text-emerald-400">Active</span>}</p>
-                  <p className="text-slate-300"><strong>Created:</strong> {selectedDispatcher.created_at ? new Date(selectedDispatcher.created_at).toLocaleString() : '-'}</p>
-                </div>
-              )}
-              <button onClick={() => { setSelectedDispatcher(null); setEditMode(null); }} className="mt-4 w-full py-2 rounded-xl bg-slate-800 text-slate-300">Close</button>
-            </div>
-          </div>
-        )}
-
+        
         {/* Tenant Management View - Super Admin Only */}
         {view === 'tenants' && currentUser?.role === 'SUPER_ADMIN' && (
           <div className="space-y-6">
