@@ -4,7 +4,8 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:15
-    container_name: dgds-postgres
+    container_name: dgds-pg
+    hostname: dgds-pg
     environment:
       POSTGRES_DB: dgds_clone_db
       POSTGRES_USER: dgds_user
@@ -24,13 +25,14 @@ services:
   # MongoDB (for future use)
   mongo:
     image: mongo:7
-    container_name: dgds-mongo
+    container_name: dgds-mg
+    hostname: dgds-mg
     environment:
       MONGO_INITDB_ROOT_USERNAME: dgds_user
       MONGO_INITDB_ROOT_PASSWORD: dgds_password
       MONGO_INITDB_DATABASE: dgds_clone_db
     ports:
-      - "6000:27017"
+      - "30300:27017"
     volumes:
       - mongo_data:/data/db
     networks:
@@ -41,12 +43,13 @@ services:
       timeout: 5s
       retries: 5
 
-  # FastAPI Backend (exposed on port 5000 for external access)
+  # FastAPI Backend (exposed on port 8000 for external access)
   backend:
     build: ./backend
-    container_name: dgds-backend
+    container_name: dgds-be
+    hostname: dgds-be
     environment:
-      DATABASE_URL: postgresql://dgds_user:dgds_password@postgres:5432/dgds_clone_db
+      DATABASE_URL: postgresql://dgds_user:dgds_password@dgds-pg:5432/dgds_clone_db
       # Razorpay Configuration
       RAZORPAY_KEY_ID: rzp_test_RsaT4fuoDUVWwl
       RAZORPAY_KEY_SECRET: uydoRwEPkv6KVxbg1WV6qimW
@@ -56,7 +59,7 @@ services:
       PHONEPE_CLIENT_SECRET: ZTY0Njk5NGItOTdjNS00YzUzLThhNDMtNDhjMTU5NGUyOGY0
       PHONEPE_MERCHANT_ID: M2342A4X8I8BU
       PHONEPE_ENVIRONMENT: UAT
-      PHONEPE_CALLBACK_URL: http://backend:5000/api/payments/phonepe/callback
+      PHONEPE_CALLBACK_URL: http://localhost:30100/api/payments/phonepe/callback
       # UPI Configuration
       MERCHANT_UPI_ID: rideflow@upi
       MERCHANT_NAME: RideFlow
@@ -71,7 +74,7 @@ services:
       JWT_SECRET_KEY: your-super-secret-jwt-key-change-in-production-min-32-characters-long
       ACCESS_TOKEN_EXPIRE_MINUTES: 1440
     ports:
-      - "5001:5000"
+      - "30100:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,18 +83,20 @@ services:
     networks:
       - dgds-network
     restart: unless-stopped
+    command: sh -c "python fix_login_and_setup_tenants.py && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
 
-  # FastAPI Admin Service (internal only, exposed on port 8000)
+  # FastAPI Admin Service (internal only)
   admin:
     build: ./backend
     container_name: dgds-admin
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    hostname: dgds-admin
+    command: sh -c "python fix_login_and_setup_tenants.py && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
     environment:
-      DATABASE_URL: postgresql://dgds_user:dgds_password@postgres:5432/dgds_clone_db
+      DATABASE_URL: postgresql://dgds_user:dgds_password@dgds-pg:5432/dgds_clone_db
       JWT_SECRET_KEY: your-super-secret-jwt-key-change-in-production-min-32-characters-long
       ACCESS_TOKEN_EXPIRE_MINUTES: 1440
     expose:
-      - "8000"
+      - "9000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,15 +109,16 @@ services:
   # Frontend App (exposed on port 3000)
   frontend:
     build: ./frontend
-    container_name: dgds-frontend
+    container_name: dgds-fe
+    hostname: dgds-fe
     environment:
-      VITE_API_BASE_URL: http://localhost:5001
-      VITE_ADMIN_API_BASE_URL: http://localhost:8000
+      VITE_API_BASE_URL: http://localhost:30100
+      VITE_ADMIN_API_BASE_URL: http://localhost:9000
       VITE_RAZORPAY_KEY_ID: rzp_test_RsaT4fuoDUVWwl
       VITE_MERCHANT_UPI_ID: rideflow@upi
       VITE_MERCHANT_NAME: RideFlow
     ports:
-      - "3000:3000"
+      - "30000:3000"
     depends_on:
       - backend
     volumes:

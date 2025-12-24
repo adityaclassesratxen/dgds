@@ -1,9 +1,10 @@
 # DGDS Clone - Ride Booking Management System
 
 ## Port Configuration
-- **Frontend:** http://localhost:2070
-- **Backend API:** http://localhost:2060
-- **PostgreSQL Database:** localhost:2050
+- **Frontend:** http://localhost:30000
+- **Backend API:** http://localhost:30100
+- **PostgreSQL Database:** localhost:30200
+- **MongoDB:** localhost:30300 (for future use)
 
 ## Overview
 A comprehensive ride booking management system built with FastAPI (backend) and React (frontend). This system manages customers, drivers, dispatchers, vehicles, bookings, payments, and financial reporting.
@@ -87,10 +88,11 @@ A comprehensive ride booking management system built with FastAPI (backend) and 
 ### Access Points
 | Service | URL | Port |
 |---------|-----|------|
-| Frontend | http://localhost:2050 | 2050 |
-| Backend API | http://localhost:2070 | 2070 |
-| API Documentation | http://localhost:2070/docs | 2070 |
-| Database | localhost:2060 | 2060 |
+| Frontend | http://localhost:30000 | 30000 |
+| Backend API | http://localhost:30100 | 30100 |
+| API Documentation | http://localhost:30100/docs | 30100 |
+| PostgreSQL Database | localhost:30200 | 30200 |
+| MongoDB | localhost:30300 | 30300 |
 
 ## Configuration
 
@@ -258,7 +260,7 @@ RAZORPAY_KEY_SECRET=...
 ### Common Issues
 
 1. **Port conflicts**
-   - Check if ports 2050, 2060, 2070 are free
+   - Check if ports 30000, 30100, 30200, 30300 are free
    - Update ports in docker-compose.yml if needed
 
 2. **Database connection errors**
@@ -318,5 +320,5 @@ For technical support:
 
 ---
 
-**Last Updated:** December 19, 2025
+**Last Updated:** December 23, 2025
 **Maintainer:** DGDS Development Team

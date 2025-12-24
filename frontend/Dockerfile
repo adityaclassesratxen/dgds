@@ -13,7 +13,8 @@ RUN npm cache clean --force && \
 COPY . .
 
 # Set environment variables
-ENV VITE_API_BASE_URL=http://host.docker.internal:5001
+ENV VITE_API_BASE_URL=http://localhost:30100
+ENV VITE_ADMIN_API_BASE_URL=http://localhost:9000
 ENV PORT=3000
 
 EXPOSE 3000

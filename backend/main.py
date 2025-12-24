@@ -2142,7 +2142,7 @@ async def quick_login(request: Request, role: str, db: Session = Depends(get_db)
         "driver": {"email": "driver@test.com", "password": "test123", "role": UserRole.DRIVER},
         "dispatcher": {"email": "dispatcher@test.com", "password": "test123", "role": UserRole.DISPATCHER},
         "admin": {"email": "admin@test.com", "password": "test123", "role": UserRole.ADMIN},
-        "super_admin": {"email": "superadmin@test.com", "password": "test123", "role": UserRole.SUPER_ADMIN}
+        "super_admin": {"email": "superadmin@demo.com", "password": "admin123", "role": UserRole.SUPER_ADMIN}
     }
     
     if role not in test_accounts:
@@ -2157,12 +2157,15 @@ async def quick_login(request: Request, role: str, db: Session = Depends(get_db)
     if not user:
         # Truncate password to 72 bytes for bcrypt compatibility
         password = account["password"][:72]
+        # Super admin should have tenant_id = None
+        tenant_id = None if role == "super_admin" else None
         user = User(
             email=account["email"],
             password_hash=get_password_hash(password),
             role=account["role"],
             is_active=True,
-            is_verified=True
+            is_verified=True,
+            tenant_id=tenant_id
         )
         db.add(user)
         db.commit()
