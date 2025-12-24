@@ -274,32 +274,76 @@ windsurf-project-2/
    - Select "Demo Client" to view seeded data
    - Select "DGDS Client" for clean UAT environment
 
-### Production Deployment
+### Production Deployment (Render.com + Neon Database)
 
-1. **Update Environment Variables**
-   ```yaml
-   # In docker-compose.yml
-   DATABASE_URL: postgresql://user:pass@prod-host:5432/db
-   RAZORPAY_KEY_ID: rzp_live_...
-   RAZORPAY_KEY_SECRET: ...
+#### 1. Set up Neon Database
+1. Create a new project at [Neon.tech](https://neon.tech)
+2. Copy the connection string (format: `postgresql://user:pass@host/dbname`)
+3. Note: Database will be automatically seeded on first backend startup
+
+#### 2. Deploy Backend to Render
+1. Create a new Web Service on Render.com
+2. Connect your GitHub repository
+3. Configure the service:
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   - **Environment**: Python 3
+   
+4. Add Environment Variables:
+   ```
+   DATABASE_URL=<your-neon-connection-string>
+   RAZORPAY_KEY_ID=rzp_live_...
+   RAZORPAY_KEY_SECRET=...
+   RAZORPAY_WEBHOOK_SECRET=...
+   PHONEPE_CLIENT_ID=...
+   PHONEPE_CLIENT_SECRET=...
+   PHONEPE_MERCHANT_ID=...
+   PHONEPE_ENVIRONMENT=PRODUCTION
+   PHONEPE_CALLBACK_URL=https://your-backend-url.onrender.com/api/payments/phonepe/callback
+   MERCHANT_UPI_ID=...
+   MERCHANT_NAME=...
+   JWT_SECRET_KEY=<generate-strong-random-key>
+   ACCESS_TOKEN_EXPIRE_MINUTES=1440
+   HOURLY_RATE=400
+   DRIVER_COMMISSION_PERCENT=75
+   ADMIN_COMMISSION_PERCENT=20
+   DISPATCHER_COMMISSION_PERCENT=2
+   SUPER_ADMIN_COMMISSION_PERCENT=3
+   APP_NAME=DGDS Clone
    ```
 
-2. **Set up Production Database**
-   - Configure PostgreSQL with proper security
-   - Run database migrations if needed
-
-3. **Configure SSL Certificates**
-   - Set up HTTPS with valid certificates
-   - Update frontend API URL to use HTTPS
-
-4. **Set up Monitoring**
-   - Configure logging and monitoring
-   - Set up health checks
-
-5. **Run Database Migrations**
-   ```bash
-   docker exec <backend-container> python fix_login_and_setup_tenants.py
+#### 3. Deploy Frontend to Render
+1. Create a new Static Site on Render.com
+2. Configure the service:
+   - **Build Command**: `npm install && npm run build`
+   - **Publish Directory**: `dist`
+   
+3. Add Environment Variables:
    ```
+   VITE_API_BASE_URL=https://your-backend-url.onrender.com
+   VITE_RAZORPAY_KEY_ID=rzp_live_...
+   VITE_MERCHANT_UPI_ID=...
+   VITE_MERCHANT_NAME=...
+   ```
+
+#### 4. Verify Deployment
+1. Access your frontend URL
+2. The system will automatically:
+   - Create database tables
+   - Seed DEMO and DGDS tenants
+   - Create super admin account
+   - Populate demo data
+
+3. Login with Super Admin:
+   - Email: superadmin@demo.com
+   - Password: admin123
+
+#### 5. Important Notes
+- **Auto-Seeding**: Database is automatically seeded on first startup
+- **Tenants**: DEMO tenant has sample data, DGDS tenant is empty for UAT
+- **Super Admin**: Can access all tenants and manage the system
+- **Security**: Change default passwords in production
+- **SSL**: Render provides free SSL certificates automatically
 
 ### Environment Variables
 ```bash

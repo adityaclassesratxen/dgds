@@ -71,6 +71,20 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="DGDS Clone API", version="1.0.0")
 
+# Startup event to auto-seed database
+@app.on_event("startup")
+async def startup_event():
+    """Run database seeding on startup"""
+    try:
+        from fix_login_and_setup_tenants import setup_default_tenants, create_super_admin
+        print("🚀 Running database initialization...")
+        setup_default_tenants()
+        create_super_admin()
+        print("✅ Database initialization complete")
+    except Exception as e:
+        print(f"⚠️ Database initialization error: {e}")
+        # Don't fail startup if seeding fails
+
 # Rate Limiting
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter

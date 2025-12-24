@@ -83,14 +83,13 @@ services:
     networks:
       - dgds-network
     restart: unless-stopped
-    command: sh -c "python fix_login_and_setup_tenants.py && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
 
   # FastAPI Admin Service (internal only)
   admin:
     build: ./backend
     container_name: dgds-admin
     hostname: dgds-admin
-    command: sh -c "python fix_login_and_setup_tenants.py && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+    command: uvicorn main:app --host 0.0.0.0 --port 9000
     environment:
       DATABASE_URL: postgresql://dgds_user:dgds_password@dgds-pg:5432/dgds_clone_db
       JWT_SECRET_KEY: your-super-secret-jwt-key-change-in-production-min-32-characters-long
