@@ -16,7 +16,7 @@ async def get_tenant_filter(
     Get tenant_id for filtering queries based on current user.
     Super Admin and Admin can override via X-Tenant-Id header to work within a specific tenant.
     Returns None when Super Admin or Admin has no header set (sees all data).
-    Returns tenant_id for other roles (can only see their tenant's data).
+    For other roles, uses X-Tenant-Id header or their assigned tenant_id.
     """
     # Super Admin and Admin can switch tenant context via header or see all data
     if current_user.role in [UserRole.SUPER_ADMIN, UserRole.ADMIN]:
@@ -28,14 +28,21 @@ async def get_tenant_filter(
         # No header means see all data (return None to skip tenant filtering)
         return None
     
-    # For other roles, return their tenant_id
+    # For other roles, use X-Tenant-Id header if provided (for tenant switching)
+    if x_tenant_id:
+        try:
+            return int(x_tenant_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid X-Tenant-Id header")
+    
+    # Fall back to user's assigned tenant_id
     if current_user.tenant_id:
         return current_user.tenant_id
     
-    # If user has no tenant_id and is not Admin/Super Admin, they shouldn't access any data
+    # If user has no tenant_id and no header, they can't access tenant-specific data
     raise HTTPException(
         status_code=403,
-        detail="User is not assigned to any tenant"
+        detail="User is not assigned to any tenant. Please select a tenant from the dropdown."
     )
 
 

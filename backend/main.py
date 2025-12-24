@@ -2169,8 +2169,16 @@ async def quick_login(request: Request, role: str, db: Session = Depends(get_db)
     if not user:
         # Truncate password to 72 bytes for bcrypt compatibility
         password = account["password"][:72]
-        # Super admin should have tenant_id = None
-        tenant_id = None if role == "super_admin" else None
+        
+        # Assign tenant_id based on role
+        # Super admin has no tenant (can see all data)
+        # Other roles get assigned to DEMO tenant by default
+        tenant_id = None
+        if role != "super_admin":
+            demo_tenant = db.query(Tenant).filter(Tenant.code == "DEMO").first()
+            if demo_tenant:
+                tenant_id = demo_tenant.id
+        
         user = User(
             email=account["email"],
             password_hash=get_password_hash(password),
