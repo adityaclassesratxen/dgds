@@ -240,12 +240,66 @@ windsurf-project-2/
 
 ## Deployment
 
+### Quick Deployment (Docker Compose)
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/kunal1274/dgds.git
+   cd dgds
+   ```
+
+2. **Start the application**
+   ```bash
+   docker-compose up -d --build
+   ```
+   
+   The system will automatically:
+   - Create and seed the database with demo data
+   - Start all services (frontend, backend, databases)
+   - Create a super admin account
+
+3. **Access the application**
+   - Frontend: http://localhost:30000
+   - Backend API: http://localhost:30100
+   - API Documentation: http://localhost:30100/docs
+
+4. **Login as Super Admin**
+   - Click the "👑 Super Admin" button on the login page
+   - Or use credentials:
+     - Email: superadmin@demo.com
+     - Password: admin123
+
+5. **Switch Tenants**
+   - After login, use the tenant dropdown in the sidebar
+   - Select "Demo Client" to view seeded data
+   - Select "DGDS Client" for clean UAT environment
+
 ### Production Deployment
-1. Update environment variables
-2. Set up production database
-3. Configure SSL certificates
-4. Set up monitoring
-5. Run database migrations
+
+1. **Update Environment Variables**
+   ```yaml
+   # In docker-compose.yml
+   DATABASE_URL: postgresql://user:pass@prod-host:5432/db
+   RAZORPAY_KEY_ID: rzp_live_...
+   RAZORPAY_KEY_SECRET: ...
+   ```
+
+2. **Set up Production Database**
+   - Configure PostgreSQL with proper security
+   - Run database migrations if needed
+
+3. **Configure SSL Certificates**
+   - Set up HTTPS with valid certificates
+   - Update frontend API URL to use HTTPS
+
+4. **Set up Monitoring**
+   - Configure logging and monitoring
+   - Set up health checks
+
+5. **Run Database Migrations**
+   ```bash
+   docker exec <backend-container> python fix_login_and_setup_tenants.py
+   ```
 
 ### Environment Variables
 ```bash
