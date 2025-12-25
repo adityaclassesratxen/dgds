@@ -1156,7 +1156,7 @@ async def update_booking_status(
 
     valid_statuses = [
         "REQUESTED", "DRIVER_ACCEPTED", "ENROUTE_TO_PICKUP",
-        "CUSTOMER_PICKED", "AT_DESTINATION", "RETURNING", "COMPLETED"
+        "CUSTOMER_PICKED", "AT_DESTINATION", "RETURNING", "COMPLETED", "CANCELLED"
     ]
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")

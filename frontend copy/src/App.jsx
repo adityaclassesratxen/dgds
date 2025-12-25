@@ -5738,11 +5738,6 @@ function App() {
                             console.log('Updating status to DRIVER_ACCEPTED for trip:', selectedTrip.id);
                             const response = await api.patch(`/api/bookings/${selectedTrip.id}/status?status=DRIVER_ACCEPTED&description=Driver accepted the ride`);
                             console.log('Status update response:', response.data);
-                            
-                            // Immediately update selectedTrip to prevent UI revert
-                            setSelectedTrip(prev => ({ ...prev, status: 'DRIVER_ACCEPTED' }));
-                            
-                            // Then refresh all trips from backend
                             await refreshTripsAfterStatusChange(selectedTrip.id);
                           } catch (error) {
                             console.error('Failed to update status:', error.response?.data || error.message);
@@ -5769,11 +5764,6 @@ function App() {
                           console.log('Updating status to ENROUTE_TO_PICKUP for trip:', selectedTrip.id);
                           const response = await api.patch(`/api/bookings/${selectedTrip.id}/status?status=ENROUTE_TO_PICKUP&description=Driver enroute to pickup location`);
                           console.log('Status update response:', response.data);
-                          
-                          // Immediately update selectedTrip to prevent UI revert
-                          setSelectedTrip(prev => ({ ...prev, status: 'ENROUTE_TO_PICKUP' }));
-                          
-                          // Then refresh all trips from backend
                           await refreshTripsAfterStatusChange(selectedTrip.id);
                         } catch (error) {
                           console.error('Failed to update status:', error.response?.data || error.message);
@@ -5801,7 +5791,6 @@ function App() {
                     <>
                     <button
                       onClick={async () => {
-                          setSelectedTrip(prev => ({ ...prev, status: 'CUSTOMER_PICKED' }));
                           await api.patch(`/api/bookings/${selectedTrip.id}/status?status=CUSTOMER_PICKED&description=Customer picked up`);
                           await refreshTripsAfterStatusChange(selectedTrip.id);
                       }}
@@ -5826,7 +5815,6 @@ function App() {
                     <>
                     <button
                       onClick={async () => {
-                          setSelectedTrip(prev => ({ ...prev, status: 'AT_DESTINATION' }));
                           await api.patch(`/api/bookings/${selectedTrip.id}/status?status=AT_DESTINATION&description=Arrived at destination`);
                           await refreshTripsAfterStatusChange(selectedTrip.id);
                       }}
@@ -5851,7 +5839,6 @@ function App() {
                     <>
                     <button
                       onClick={async () => {
-                          setSelectedTrip(prev => ({ ...prev, status: 'COMPLETED' }));
                           await api.patch(`/api/bookings/${selectedTrip.id}/status?status=COMPLETED&description=Trip completed`);
                           await refreshTripsAfterStatusChange(selectedTrip.id);
                       }}
