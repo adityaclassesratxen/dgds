@@ -384,7 +384,7 @@ async def get_dashboard_stats(
     active_customers = active_customers_query.order_by(Customer.created_at.desc()).limit(5).all()
     
     # Get active dispatchers - tenant filtered
-    active_dispatchers_query = db.query(Dispatcher).filter(Dispatcher.is_active == True)
+    active_dispatchers_query = db.query(Dispatcher).filter(Dispatcher.is_archived == False)
     active_dispatchers_query = apply_tenant_filter(active_dispatchers_query, Dispatcher, tenant_filter)
     active_dispatchers = active_dispatchers_query.order_by(Dispatcher.created_at.desc()).limit(5).all()
     
@@ -421,8 +421,7 @@ async def get_dashboard_stats(
             {
                 "id": driver.id,
                 "name": driver.name,
-                "phone_number": driver.phone_number,
-                "is_available": driver.is_available
+                "created_at": driver.created_at.isoformat() if driver.created_at else None
             }
             for driver in active_drivers
         ],
@@ -431,7 +430,7 @@ async def get_dashboard_stats(
                 "id": customer.id,
                 "name": customer.name,
                 "email": customer.email,
-                "phone": customer.phone
+                "created_at": customer.created_at.isoformat() if customer.created_at else None
             }
             for customer in active_customers
         ],
@@ -440,7 +439,7 @@ async def get_dashboard_stats(
                 "id": dispatcher.id,
                 "name": dispatcher.name,
                 "email": dispatcher.email,
-                "phone": dispatcher.phone
+                "contact_number": dispatcher.contact_number
             }
             for dispatcher in active_dispatchers
         ],
@@ -937,10 +936,9 @@ async def get_vehicles(
             "nickname": v.nickname,
             "make": v.vehicle_make,
             "model": v.vehicle_model,
-            "year": v.year,
-            "color": v.color,
-            "license_plate": v.license_plate,
-            "vin": v.vin,
+            "vehicle_type": v.vehicle_type,
+            "is_automatic": v.is_automatic,
+            "transmission_type": v.transmission_type,
             "customer_id": v.customer_id,
             "created_at": v.created_at.isoformat() if v.created_at else None,
         }

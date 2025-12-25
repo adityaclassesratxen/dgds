@@ -54,6 +54,10 @@ api.interceptors.request.use(
     const selectedTenantId = localStorage.getItem('selected_tenant_id');
     if (selectedTenantId) {
       config.headers['X-Tenant-Id'] = selectedTenantId;
+      // Debug log for tenant header
+      if (config.url.includes('/transactions/') || config.url.includes('/vehicles/')) {
+        console.log(`Adding X-Tenant-Id header: ${selectedTenantId} for ${config.url}`);
+      }
     }
     
     return config;
@@ -663,8 +667,12 @@ function App() {
         .finally(() => setLoading(false));
     } else if (view === 'trips') {
       setLoading(true);
+      console.log('Fetching trips with tenant:', selectedTenant);
       api.get('/api/transactions/')
-        .then(res => setTrips(res.data))
+        .then(res => {
+          console.log('Trips response:', res.data);
+          setTrips(res.data);
+        })
         .catch(err => console.error('Failed to fetch trips:', err))
         .finally(() => setLoading(false));
     } else if (view === 'drivers') {
@@ -697,11 +705,13 @@ function App() {
         .finally(() => setLoading(false));
     } else if (view === 'vehicles') {
       setLoading(true);
+      console.log('Fetching vehicles with tenant:', selectedTenant);
       Promise.all([
         api.get('/api/vehicles/'),
         api.get('/api/customers/'),
       ])
         .then(([vehRes, custRes]) => {
+          console.log('Vehicles response:', vehRes.data);
           setVehicles(vehRes.data);
           setCustomers(custRes.data);
         })
@@ -1357,6 +1367,97 @@ function App() {
                 </button>
               </div>
               <p className="text-xs text-slate-500 mt-2 text-center">One-click login with seed accounts</p>
+            </div>
+
+            {/* Database Seeding Section */}
+            <div className="mt-6 pt-6 border-t border-slate-800">
+              <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-2xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-3 rounded-xl bg-purple-500/20">
+                    <svg className="h-6 w-6 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Database Setup</h3>
+                    <p className="text-xs text-slate-400">Initialize or seed demo data</p>
+                  </div>
+                </div>
+                
+                <div className="space-y-3">
+                  <button
+                    onClick={async () => {
+                      if (!confirm('This will seed the database with demo data (100 trips, 30 drivers, 10 customers, 5 dispatchers, 20 vehicles). Continue?')) return;
+                      try {
+                        setAuthLoading(true);
+                        setAuthError('');
+                        // Login as super admin first
+                        const loginRes = await api.post('/api/auth/quick-login/super_admin');
+                        localStorage.setItem('auth_token', loginRes.data.access_token);
+                        localStorage.setItem('auth_user', JSON.stringify(loginRes.data.user));
+                        
+                        // Trigger seeding
+                        await api.post('/api/admin/seed-database');
+                        alert('✅ Database seeding started! This may take 30-60 seconds. You can login and check the data.');
+                        window.location.reload();
+                      } catch (err) {
+                        setAuthError(err.response?.data?.detail || 'Failed to seed database');
+                      } finally {
+                        setAuthLoading(false);
+                      }
+                    }}
+                    disabled={authLoading}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-500/20 to-green-500/20 border border-emerald-500/30 text-emerald-300 hover:from-emerald-500/30 hover:to-green-500/30 transition disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">🌱</span>
+                      <div className="text-left">
+                        <div className="font-semibold">Seed Demo Data</div>
+                        <div className="text-xs text-emerald-400/70">100 trips, 30 drivers, 10 customers</div>
+                      </div>
+                    </div>
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (!confirm('This will initialize database tables and create default tenants. Continue?')) return;
+                      try {
+                        setAuthLoading(true);
+                        setAuthError('');
+                        await api.post('/api/admin/initialize-database');
+                        alert('✅ Database initialized successfully!');
+                      } catch (err) {
+                        setAuthError(err.response?.data?.detail || 'Failed to initialize database');
+                      } finally {
+                        setAuthLoading(false);
+                      }
+                    }}
+                    disabled={authLoading}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-gradient-to-r from-blue-500/20 to-indigo-500/20 border border-blue-500/30 text-blue-300 hover:from-blue-500/30 hover:to-indigo-500/30 transition disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">🔧</span>
+                      <div className="text-left">
+                        <div className="font-semibold">Initialize Database</div>
+                        <div className="text-xs text-blue-400/70">Create tables & default tenants</div>
+                      </div>
+                    </div>
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-xs text-amber-300 flex items-start gap-2">
+                    <span>⚠️</span>
+                    <span>These actions require Super Admin privileges. Seeding will automatically log you in as Super Admin.</span>
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2181,7 +2282,7 @@ function App() {
                         {/* Customer & Driver Info with Phone */}
                         <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                           <div className="flex items-center gap-2">
-                            <span className="text-slate-500">Customer:</span>
+                            <span className="text-slate-500">{t('trip.customer')}:</span>
                             <span className="text-white">{trip.customer?.name || 'N/A'}</span>
                             {customerPhone && (
                               <a href={`tel:${customerPhone}`} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-xs hover:bg-emerald-500/30">
@@ -2191,7 +2292,7 @@ function App() {
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-slate-500">Driver:</span>
+                            <span className="text-slate-500">{t('trip.driver')}:</span>
                             <span className="text-white">{trip.driver?.name || 'N/A'}</span>
                             {driverPhone && (
                               <a href={`tel:${driverPhone}`} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-xs hover:bg-purple-500/30">
@@ -2217,7 +2318,7 @@ function App() {
                         </div>
                         <p className="mt-1 text-xs text-slate-500 flex items-center gap-1">
                           <MapPin className="w-3 h-3" />
-                          {trip.pickup_location} → {trip.destination_location}
+                          {t('trip.pickupLocation')}: {trip.pickup_location} → {t('trip.destinationLocation')}: {trip.destination_location}
                         </p>
                       </div>
                       <div className="flex gap-2">
@@ -2226,13 +2327,13 @@ function App() {
                           className="rounded-xl bg-green-500/10 px-3 py-1 text-sm text-green-300 transition hover:bg-green-500/20 flex items-center gap-1"
                         >
                           <Share2 className="h-4 w-4" />
-                          Share
+                          {t('buttons.share')}
                         </button>
                         <button 
                           onClick={() => setSelectedTrip(trip)}
                           className="rounded-xl bg-blue-500/10 px-3 py-1 text-sm text-blue-300 transition hover:bg-blue-500/20"
                         >
-                          Manage
+                          {t('buttons.manage')}
                         </button>
                       </div>
                     </div>
@@ -2282,7 +2383,7 @@ function App() {
             >
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Driver Name *</span>
+                  <span className="text-slate-300">{t('driver.name')} *</span>
                   <input
                     type="text"
                     value={driverForm.name}
@@ -2292,7 +2393,7 @@ function App() {
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Phone Number *</span>
+                  <span className="text-slate-300">{t('auth.phoneNumber')} *</span>
                   <input
                     type="tel"
                     value={driverForm.phone_number}
@@ -2303,7 +2404,7 @@ function App() {
                   />
                 </label>
                 <label className="space-y-2 text-sm md:col-span-2">
-                  <span className="text-slate-300">Address Line *</span>
+                  <span className="text-slate-300">{t('register.addressLineLabel')} *</span>
                   <input
                     type="text"
                     value={driverForm.address_line}
@@ -2313,7 +2414,7 @@ function App() {
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">City *</span>
+                  <span className="text-slate-300">{t('auth.city')} *</span>
                   <input
                     type="text"
                     value={driverForm.city}
@@ -2323,7 +2424,7 @@ function App() {
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">State *</span>
+                  <span className="text-slate-300">{t('auth.state')} *</span>
                   <input
                     type="text"
                     value={driverForm.state}
@@ -2333,7 +2434,7 @@ function App() {
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Postal Code *</span>
+                  <span className="text-slate-300">{t('auth.postalCode')} *</span>
                   <input
                     type="text"
                     value={driverForm.postal_code}
@@ -2357,7 +2458,7 @@ function App() {
                 disabled={isSubmitting}
                 className="w-full rounded-2xl bg-gradient-to-r from-purple-500 to-blue-500 px-6 py-4 text-lg font-semibold text-white shadow-lg transition hover:brightness-110 disabled:opacity-60"
               >
-                {isSubmitting ? 'Creating Driver...' : 'Create Driver'}
+                {isSubmitting ? t('common.loading') : t('driver.add')}
               </button>
               {submitStatus && (
                 <div className={`rounded-2xl border px-4 py-3 text-center text-sm ${
@@ -2482,8 +2583,8 @@ function App() {
                           </p>
                         )}
                         <div className="mt-2 flex gap-4 text-xs text-slate-400">
-                          <span>{driver.addresses?.length || 0} address(es)</span>
-                          <span>{driver.contact_numbers?.length || 0} contact(s)</span>
+                          <span>{driver.addresses?.length || 0} {driver.addresses?.length === 1 ? t('common.address') : t('common.addresses')}</span>
+                          <span>{driver.contact_numbers?.length || 0} {driver.contact_numbers?.length === 1 ? t('common.contact') : t('common.contacts')}</span>
                         </div>
                       </div>
                       <div className="flex gap-2">
@@ -2552,7 +2653,7 @@ function App() {
                       <div>
                         <h3 className="text-lg font-semibold text-white">{dispatcher.name}</h3>
                         <p className="text-sm text-slate-400">{dispatcher.email}</p>
-                        <p className="text-sm text-slate-300">Phone: {dispatcher.contact_number}</p>
+                        <p className="text-sm text-slate-300">{t('dispatcher.phone')}: {dispatcher.contact_number}</p>
                       </div>
                       <div className="flex gap-2">
                         <button 
@@ -2647,48 +2748,48 @@ function App() {
                 className="grid gap-4 md:grid-cols-2"
               >
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Customer *</span>
+                  <span className="text-slate-300">{t('customer.title')} *</span>
                   <select
                     value={vehicleForm.customer_id}
                     onChange={(e) => setVehicleForm(prev => ({ ...prev, customer_id: e.target.value }))}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
                     required
                   >
-                    <option value="">Select Customer</option>
+                    <option value="">{t('forms.selectCustomer')}</option>
                     {customers.map(c => (
                       <option key={c.id} value={c.id}>{c.name} ({c.email})</option>
                     ))}
                   </select>
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Nickname *</span>
+                  <span className="text-slate-300">{t('vehicle.nickname')} *</span>
                   <input
                     type="text"
                     value={vehicleForm.nickname}
                     onChange={(e) => setVehicleForm(prev => ({ ...prev, nickname: e.target.value }))}
-                    placeholder="My Car"
+                    placeholder={t('vehicle.nicknamePlaceholder')}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
                     required
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Make *</span>
+                  <span className="text-slate-300">{t('vehicle.make')} *</span>
                   <input
                     type="text"
                     value={vehicleForm.vehicle_make}
                     onChange={(e) => setVehicleForm(prev => ({ ...prev, vehicle_make: e.target.value }))}
-                    placeholder="Toyota, Honda, etc."
+                    placeholder={t('vehicle.makePlaceholder')}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
                     required
                   />
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Model *</span>
+                  <span className="text-slate-300">{t('vehicle.model')} *</span>
                   <input
                     type="text"
                     value={vehicleForm.vehicle_model}
                     onChange={(e) => setVehicleForm(prev => ({ ...prev, vehicle_model: e.target.value }))}
-                    placeholder="Corolla, City, etc."
+                    placeholder={t('vehicle.modelPlaceholder')}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white"
                     required
                   />
@@ -2708,12 +2809,12 @@ function App() {
                   </select>
                 </label>
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">Registration Number *</span>
+                  <span className="text-slate-300">{t('vehicle.registrationNumber')} *</span>
                   <input
                     type="text"
                     value={vehicleForm.registration_number}
                     onChange={(e) => setVehicleForm(prev => ({ ...prev, registration_number: e.target.value.toUpperCase() }))}
-                    placeholder="KA01AB1234"
+                    placeholder={t('vehicle.registrationPlaceholder')}
                     className="w-full rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-white uppercase"
                     required
                   />
@@ -2725,14 +2826,14 @@ function App() {
                     onChange={(e) => setVehicleForm(prev => ({ ...prev, is_automatic: e.target.checked }))}
                     className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-cyan-500"
                   />
-                  Automatic Transmission
+                  {t('vehicle.automaticTransmission')}
                 </label>
                 <button
                   type="submit"
                   disabled={isSubmitting}
                   className="md:col-span-2 w-full rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-3 text-lg font-semibold text-white shadow-lg transition hover:brightness-110 disabled:opacity-60"
                 >
-                  {isSubmitting ? 'Adding Vehicle...' : 'Add Vehicle'}
+                  {isSubmitting ? t('common.loading') : t('vehicle.add')}
                 </button>
               </form>
               {submitStatus && (
@@ -2748,7 +2849,7 @@ function App() {
 
             {/* Vehicles List */}
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl shadow-blue-500/10">
-              <h2 className="mb-6 text-2xl font-semibold text-white">All Vehicles</h2>
+              <h2 className="mb-6 text-2xl font-semibold text-white">{t('vehicle.all')}</h2>
               {loading ? (
                 <p className="text-slate-400">Loading...</p>
               ) : vehicles.length === 0 ? (
@@ -2769,9 +2870,9 @@ function App() {
                         </span>
                       </div>
                       <div className="text-sm text-slate-300 space-y-1">
-                        <p><span className="text-slate-500">Make:</span> {vehicle.make}</p>
-                        <p><span className="text-slate-500">Model:</span> {vehicle.model}</p>
-                        <p><span className="text-slate-500">Type:</span> {vehicle.type}</p>
+                        <p><span className="text-slate-500">{t('vehicle.make')}:</span> {vehicle.make}</p>
+                        <p><span className="text-slate-500">{t('vehicle.model')}:</span> {vehicle.model}</p>
+                        <p><span className="text-slate-500">{t('vehicle.type')}:</span> {vehicle.type}</p>
                       </div>
                       <div className="mt-3 flex gap-2">
                         <button
@@ -2783,7 +2884,7 @@ function App() {
                           }}
                           className="flex-1 rounded-xl bg-red-500/10 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500/20"
                         >
-                          Delete
+                          {t('buttons.delete')}
                         </button>
                         <button
                           onClick={() => {
@@ -2792,7 +2893,7 @@ function App() {
                           }}
                           className="flex-1 rounded-xl bg-emerald-500/10 px-3 py-1 text-sm text-emerald-300 transition hover:bg-emerald-500/20"
                         >
-                          Book Ride
+                          {t('vehicle.bookRide')}
                         </button>
                       </div>
                     </div>
@@ -3002,10 +3103,10 @@ function App() {
 
                 {/* Expense Details Section */}
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <h3 className="text-sm font-semibold text-white mb-4">Expense Details (Optional)</h3>
+                  <h3 className="text-sm font-semibold text-white mb-4">{t('booking.expenseDetails')} ({t('booking.optional')})</h3>
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="space-y-2 text-sm">
-                      <span className="text-slate-300">Food Bill</span>
+                      <span className="text-slate-300">{t('booking.foodBill')}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -3017,7 +3118,7 @@ function App() {
                       />
                     </label>
                     <label className="space-y-2 text-sm">
-                      <span className="text-slate-300">Outstation Bill</span>
+                      <span className="text-slate-300">{t('booking.outstationBill')}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -3029,7 +3130,7 @@ function App() {
                       />
                     </label>
                     <label className="space-y-2 text-sm">
-                      <span className="text-slate-300">Toll Fees</span>
+                      <span className="text-slate-300">{t('booking.tollFees')}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -3041,7 +3142,7 @@ function App() {
                       />
                     </label>
                     <label className="space-y-2 text-sm">
-                      <span className="text-slate-300">Accommodation Bill</span>
+                      <span className="text-slate-300">{t('booking.accommodationBill')}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -3053,7 +3154,7 @@ function App() {
                       />
                     </label>
                     <label className="space-y-2 text-sm">
-                      <span className="text-slate-300">Late Fine</span>
+                      <span className="text-slate-300">{t('booking.lateFine')}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -3065,7 +3166,7 @@ function App() {
                       />
                     </label>
                     <label className="space-y-2 text-sm">
-                      <span className="text-slate-300">Pickup Location Fare (Auto Rickshaw)</span>
+                      <span className="text-slate-300">{t('booking.pickupLocationFare')}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -3084,12 +3185,12 @@ function App() {
                       onChange={(e) => setBookingForm(prev => ({ ...prev, accommodation_included: e.target.checked }))}
                       className="h-4 w-4 text-emerald-500 focus:ring-emerald-500"
                     />
-                    Accommodation Included
+                    {t('booking.accommodationIncluded')}
                   </label>
                 </div>
 
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <p className="text-sm text-slate-400">Estimated Cost: ₹{bookingForm.ride_duration_hours * 400}</p>
+                  <p className="text-sm text-slate-400">{t('booking.estimatedCost')}: ₹{bookingForm.ride_duration_hours * 400}</p>
                   <p className="text-xs text-slate-500">
                     Driver (75%): ₹{Math.round(bookingForm.ride_duration_hours * 400 * 0.75)} | 
                     Admin (20%): ₹{Math.round(bookingForm.ride_duration_hours * 400 * 0.20)} | 
@@ -3131,7 +3232,7 @@ function App() {
                     className="p-6 rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-purple-300 mb-2">📊 {t('analytics.overview')}</h3>
-                    <p className="text-sm text-slate-400">Platform-wide statistics and insights</p>
+                    <p className="text-sm text-slate-400">{t('analytics.overviewDescription')}</p>
                   </div>
                   
                   <div 
@@ -3139,7 +3240,7 @@ function App() {
                     className="p-6 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-blue-300 mb-2">🚗 {t('analytics.byDriver')}</h3>
-                    <p className="text-sm text-slate-400">Driver earnings and performance</p>
+                    <p className="text-sm text-slate-400">{t('analytics.driverDescription')}</p>
                   </div>
                   
                   <div 
@@ -3147,7 +3248,7 @@ function App() {
                     className="p-6 rounded-xl border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-green-300 mb-2">👤 {t('analytics.byCustomer')}</h3>
-                    <p className="text-sm text-slate-400">Customer spending and bookings</p>
+                    <p className="text-sm text-slate-400">{t('analytics.customerDescription')}</p>
                   </div>
                   
                   <div 
@@ -3155,7 +3256,7 @@ function App() {
                     className="p-6 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-amber-300 mb-2">🚙 {t('analytics.byVehicle')}</h3>
-                    <p className="text-sm text-slate-400">Vehicle usage and revenue</p>
+                    <p className="text-sm text-slate-400">{t('analytics.vehicleDescription')}</p>
                   </div>
                   
                   <div 
@@ -3163,7 +3264,7 @@ function App() {
                     className="p-6 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-cyan-300 mb-2">📞 {t('analytics.byDispatcher')}</h3>
-                    <p className="text-sm text-slate-400">Dispatcher commission breakdown</p>
+                    <p className="text-sm text-slate-400">{t('analytics.dispatcherDescription')}</p>
                   </div>
                   
                   <div 
@@ -3171,7 +3272,7 @@ function App() {
                     className="p-6 rounded-xl border border-pink-500/30 bg-pink-500/10 hover:bg-pink-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-pink-300 mb-2">💰 {t('analytics.byTransaction')}</h3>
-                    <p className="text-sm text-slate-400">Transaction-level details</p>
+                    <p className="text-sm text-slate-400">{t('analytics.transactionDescription')}</p>
                   </div>
 
                   <div 
@@ -3179,7 +3280,7 @@ function App() {
                     className="p-6 rounded-xl border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-orange-300 mb-2">⚙️ {t('analytics.byAdmin')}</h3>
-                    <p className="text-sm text-slate-400">Admin commission breakdown</p>
+                    <p className="text-sm text-slate-400">{t('analytics.adminDescription')}</p>
                   </div>
 
                   <div 
@@ -3187,13 +3288,13 @@ function App() {
                     className="p-6 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition cursor-pointer hover:scale-105 transform"
                   >
                     <h3 className="text-lg font-semibold text-red-300 mb-2">👑 {t('analytics.bySuperAdmin')}</h3>
-                    <p className="text-sm text-slate-400">Super admin commission breakdown</p>
+                    <p className="text-sm text-slate-400">{t('analytics.superAdminDescription')}</p>
                   </div>
                 </div>
                 
                 <div className="mt-6 p-4 rounded-xl bg-slate-800/50 border border-slate-700">
                   <p className="text-sm text-slate-400">
-                    <strong className="text-white">Commission Structure:</strong> Driver 79% • Dispatcher 18% • Admin 2% • Super Admin 1%
+                    <strong className="text-white">{t('analytics.commissionStructure')}:</strong> {t('analytics.commissionBreakdown')}
                   </p>
                 </div>
               </div>
@@ -3209,7 +3310,7 @@ function App() {
                       }}
                       className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
                     >
-                      ← Back to Reports
+                      ← {t('analytics.backToReports')}
                     </button>
                     <h2 className="text-2xl font-semibold text-white">
                       {selectedAnalyticsReport === 'driver' && '🚗 Driver Analytics'}
@@ -3225,20 +3326,20 @@ function App() {
 
                   {/* Time Period Filter */}
                   <div className="mb-6">
-                    <label className="block text-sm text-slate-400 mb-3">Time Period</label>
+                    <label className="block text-sm text-slate-400 mb-3">{t('analytics.timePeriod')}</label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                       {[
-                        { label: '1 Day', value: '1day' },
-                        { label: '7 Days', value: '7days' },
-                        { label: '14 Days', value: '14days' },
-                        { label: '30 Days', value: '30days' },
-                        { label: '1 Month', value: '1month' },
-                        { label: '3 Months', value: '3months' },
-                        { label: '6 Months', value: '6months' },
-                        { label: '1 Year', value: '1year' },
-                        { label: '5 Years', value: '5years' },
-                        { label: '6 Years', value: '6years' },
-                        { label: 'All Time', value: 'all' }
+                        { label: t('analytics.timePeriods.1day'), value: '1day' },
+                        { label: t('analytics.timePeriods.7days'), value: '7days' },
+                        { label: t('analytics.timePeriods.14days'), value: '14days' },
+                        { label: t('analytics.timePeriods.30days'), value: '30days' },
+                        { label: t('analytics.timePeriods.1month'), value: '1month' },
+                        { label: t('analytics.timePeriods.3months'), value: '3months' },
+                        { label: t('analytics.timePeriods.6months'), value: '6months' },
+                        { label: t('analytics.timePeriods.1year'), value: '1year' },
+                        { label: t('analytics.timePeriods.5years'), value: '5years' },
+                        { label: t('analytics.timePeriods.6years'), value: '6years' },
+                        { label: t('analytics.timePeriods.all'), value: 'all' }
                       ].map((period) => (
                         <button
                           key={period.value}
@@ -3258,12 +3359,12 @@ function App() {
                   {/* Vehicle Transmission Filter - Show only for vehicle analytics */}
                   {selectedAnalyticsReport === 'vehicle' && (
                     <div className="mb-6">
-                      <label className="block text-sm text-slate-400 mb-3">Transmission Type</label>
+                      <label className="block text-sm text-slate-400 mb-3">{t('analytics.transmissionType')}</label>
                       <div className="flex gap-2">
                         {[
-                          { label: 'All', value: 'all' },
-                          { label: 'Automatic', value: 'automatic' },
-                          { label: 'Manual', value: 'manual' }
+                          { label: t('common.all'), value: 'all' },
+                          { label: t('vehicle.automatic'), value: 'automatic' },
+                          { label: t('vehicle.manual'), value: 'manual' }
                         ].map((type) => (
                           <button
                             key={type.value}
@@ -3303,7 +3404,9 @@ function App() {
                               <p className="text-2xl font-bold text-white">
                                 {typeof value === 'number' && (key.includes('amount') || key.includes('revenue') || key.includes('commission') || key.includes('charges'))
                                   ? `₹${value.toLocaleString()}`
-                                  : typeof value === 'number' ? value.toLocaleString() : value}
+                                  : typeof value === 'number' ? value.toLocaleString() 
+                                  : typeof value === 'object' ? JSON.stringify(value, null, 0)
+                                  : value}
                               </p>
                             </div>
                           ))}
@@ -3317,15 +3420,15 @@ function App() {
                           <div className="grid gap-6 lg:grid-cols-2">
                             {/* Commission Distribution Pie Chart */}
                             <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
-                              <h3 className="text-lg font-semibold text-white mb-4">💰 Commission Distribution</h3>
+                              <h3 className="text-lg font-semibold text-white mb-4">💰 {t('analytics.commissionDistribution')}</h3>
                               <ResponsiveContainer width="100%" height={300}>
                                 <PieChart>
                                   <Pie
                                     data={[
-                                      { name: 'Driver (79%)', value: analyticsData.summary?.total_commission_earned || 0, color: '#10b981' },
-                                      { name: 'Dispatcher (18%)', value: (analyticsData.summary?.total_revenue || 0) * 0.18, color: '#8b5cf6' },
-                                      { name: 'Admin (2%)', value: (analyticsData.summary?.total_revenue || 0) * 0.02, color: '#f59e0b' },
-                                      { name: 'Super Admin (1%)', value: (analyticsData.summary?.total_revenue || 0) * 0.01, color: '#ef4444' }
+                                      { name: t('analytics.driverPercentage', {percent: '79%'}), value: analyticsData.summary?.total_commission_earned || 0, color: '#10b981' },
+                                      { name: t('analytics.dispatcherPercentage', {percent: '18%'}), value: (analyticsData.summary?.total_revenue || 0) * 0.18, color: '#8b5cf6' },
+                                      { name: t('analytics.adminPercentage', {percent: '2%'}), value: (analyticsData.summary?.total_revenue || 0) * 0.02, color: '#f59e0b' },
+                                      { name: t('analytics.superAdminPercentage', {percent: '1%'}), value: (analyticsData.summary?.total_revenue || 0) * 0.01, color: '#ef4444' }
                                     ]}
                                     cx="50%"
                                     cy="50%"
@@ -3353,14 +3456,14 @@ function App() {
 
                             {/* Payment Status Pie Chart */}
                             <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
-                              <h3 className="text-lg font-semibold text-white mb-4">📊 Payment Status</h3>
+                              <h3 className="text-lg font-semibold text-white mb-4">📊 {t('analytics.paymentStatus')}</h3>
                               <ResponsiveContainer width="100%" height={300}>
                                 <PieChart>
                                   <Pie
                                     data={[
-                                      { name: 'Fully Paid', value: analyticsData.summary?.total_fully_paid_transactions || 0, color: '#10b981' },
-                                      { name: 'Partially Paid', value: analyticsData.summary?.total_partially_paid_transactions || 0, color: '#f59e0b' },
-                                      { name: 'Unpaid', value: analyticsData.summary?.total_unpaid_transactions || 0, color: '#ef4444' }
+                                      { name: t('analytics.fullyPaid'), value: analyticsData.summary?.total_fully_paid_transactions || 0, color: '#10b981' },
+                                      { name: t('analytics.partiallyPaid'), value: analyticsData.summary?.total_partially_paid_transactions || 0, color: '#f59e0b' },
+                                      { name: t('common.unpaid'), value: analyticsData.summary?.total_unpaid_transactions || 0, color: '#ef4444' }
                                     ]}
                                     cx="50%"
                                     cy="50%"
@@ -3384,7 +3487,7 @@ function App() {
 
                           {/* Driver Revenue Bar Chart */}
                           <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
-                            <h3 className="text-lg font-semibold text-white mb-4">📈 Revenue by Driver</h3>
+                            <h3 className="text-lg font-semibold text-white mb-4">📈 {t('analytics.revenueByDriver')}</h3>
                             <ResponsiveContainer width="100%" height={400}>
                               <BarChart data={analyticsData.drivers.slice(0, 10).map(d => ({
                                 name: d.driver_name?.split(' ')[0] || `Driver ${d.driver_id}`,
@@ -3401,15 +3504,15 @@ function App() {
                                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #374151', borderRadius: '8px' }}
                                 />
                                 <Legend />
-                                <Bar dataKey="revenue" name="Total Revenue" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey="commission" name="Commission Earned" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="revenue" name={t('analytics.totalRevenue')} fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="commission" name={t('analytics.commissionEarned')} fill="#10b981" radius={[4, 4, 0, 0]} />
                               </BarChart>
                             </ResponsiveContainer>
                           </div>
 
                           {/* Commission Paid vs Pending Bar Chart */}
                           <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
-                            <h3 className="text-lg font-semibold text-white mb-4">💵 Commission: Paid vs Pending</h3>
+                            <h3 className="text-lg font-semibold text-white mb-4">💵 {t('analytics.commissionPaidVsPending')}</h3>
                             <ResponsiveContainer width="100%" height={350}>
                               <BarChart data={analyticsData.drivers.slice(0, 10).map(d => ({
                                 name: d.driver_name?.split(' ')[0] || `Driver ${d.driver_id}`,
@@ -3424,8 +3527,8 @@ function App() {
                                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #374151', borderRadius: '8px' }}
                                 />
                                 <Legend />
-                                <Bar dataKey="paid" name="Commission Paid" fill="#10b981" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey="pending" name="Commission Pending" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="paid" name={t('analytics.commissionPaid')} fill="#10b981" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="pending" name={t('analytics.commissionPending')} fill="#f59e0b" radius={[4, 4, 0, 0]} />
                               </BarChart>
                             </ResponsiveContainer>
                           </div>
@@ -3433,8 +3536,8 @@ function App() {
                           {/* Driver Details with Hierarchical Drill-Down */}
                           <div className="rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden">
                             <div className="p-4 border-b border-slate-700">
-                              <h3 className="text-lg font-semibold text-white">🚗 Driver Details - Hierarchical Drill-Down</h3>
-                              <p className="text-xs text-slate-400 mt-1">Click on any driver to view transaction details and payment history</p>
+                              <h3 className="text-lg font-semibold text-white">🚗 {t('analytics.driverDetailsHierarchical')}</h3>
+                              <p className="text-xs text-slate-400 mt-1">{t('analytics.driverDetailsDescription')}</p>
                             </div>
                             <div className="space-y-2 p-4">
                               {analyticsData.drivers.map((driver) => (
@@ -3456,19 +3559,19 @@ function App() {
                                       </div>
                                       <div className="grid grid-cols-5 gap-4 text-center">
                                         <div>
-                                          <p className="text-xs text-slate-400">Revenue</p>
+                                          <p className="text-xs text-slate-400">{t('analytics.revenue')}</p>
                                           <p className="text-emerald-300 font-semibold">₹{(driver.total_revenue_generated || 0).toLocaleString()}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-slate-400">Commission</p>
+                                          <p className="text-xs text-slate-400">{t('analytics.commission')}</p>
                                           <p className="text-purple-300 font-semibold">₹{(driver.commission_earned || 0).toLocaleString()}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-slate-400">Trips</p>
+                                          <p className="text-xs text-slate-400">{t('analytics.trips')}</p>
                                           <p className="text-white font-semibold">{driver.total_bookings || 0}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs text-slate-400">Status</p>
+                                          <p className="text-xs text-slate-400">{t('common.status')}</p>
                                           <div className="flex gap-1 justify-center">
                                             <span className="px-2 py-0.5 rounded text-xs bg-green-500/20 text-green-300">{driver.fully_paid_transactions || 0}</span>
                                             <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-300">{driver.partially_paid_transactions || 0}</span>
@@ -3834,12 +3937,474 @@ function App() {
                         </div>
                       )}
 
-                      {/* Generic data display for other report types */}
-                      {selectedAnalyticsReport !== 'driver' && (
+                      {/* Dispatcher Analytics Display */}
+                      {selectedAnalyticsReport === 'dispatcher' && analyticsData && (
+                        <div className="space-y-6">
+                          {/* Summary Cards */}
+                          {analyticsData.summary && (
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalDispatchers')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_dispatchers || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalBookings')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_bookings || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionEarned')}</p>
+                                <p className="text-2xl font-bold text-emerald-400">₹{(analyticsData.summary.total_commission_earned || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionPending')}</p>
+                                <p className="text-2xl font-bold text-yellow-400">₹{(analyticsData.summary.total_commission_pending || 0).toLocaleString()}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Dispatcher Details */}
+                          {analyticsData.dispatchers && analyticsData.dispatchers.length > 0 && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50">
+                              <div className="p-4 border-b border-slate-700">
+                                <h3 className="text-lg font-semibold text-white">{t('analytics.dispatcherPerformance')}</h3>
+                                <p className="text-xs text-slate-400 mt-1">{t('analytics.clickToViewDetails', { entity: 'dispatcher', details: 'transaction details' })}</p>
+                              </div>
+                              <div className="space-y-2 p-4">
+                                {analyticsData.dispatchers.map((dispatcher) => (
+                                  <div key={dispatcher.dispatcher_id} className="border border-slate-700 rounded-lg overflow-hidden">
+                                    <div className="p-4 bg-slate-800/50">
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <p className="font-semibold text-white text-lg">{dispatcher.dispatcher_name}</p>
+                                          <p className="text-xs text-slate-400">
+                                            ID: {dispatcher.dispatcher_id} • {dispatcher.dispatcher_email} • {dispatcher.dispatcher_phone}
+                                          </p>
+                                        </div>
+                                        <div className="grid grid-cols-4 gap-4 text-center">
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.bookings')}</p>
+                                            <p className="text-white font-semibold">{dispatcher.total_bookings_coordinated || 0}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.commission')}</p>
+                                            <p className="text-emerald-300 font-semibold">₹{(dispatcher.total_commission_earned || 0).toLocaleString()}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.paid')}</p>
+                                            <p className="text-green-300 font-semibold">₹{(dispatcher.commission_paid || 0).toLocaleString()}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.commissionPending')}</p>
+                                            <p className="text-yellow-300 font-semibold">₹{(dispatcher.commission_pending || 0).toLocaleString()}</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Customer Analytics Display */}
+                      {selectedAnalyticsReport === 'customer' && analyticsData && (
+                        <div className="space-y-6">
+                          {/* Summary Cards */}
+                          {analyticsData.summary && (
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalCustomers')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_customers || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalBookings')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_bookings || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalSpent')}</p>
+                                <p className="text-2xl font-bold text-emerald-400">₹{(analyticsData.summary.total_amount || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.avgPerCustomer')}</p>
+                                <p className="text-2xl font-bold text-blue-400">₹{analyticsData.summary.total_customers ? Math.round((analyticsData.summary.total_amount || 0) / analyticsData.summary.total_customers).toLocaleString() : 0}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Customer Details */}
+                          {analyticsData.customers && analyticsData.customers.length > 0 && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50">
+                              <div className="p-4 border-b border-slate-700">
+                                <h3 className="text-lg font-semibold text-white">{t('analytics.customerActivity')}</h3>
+                                <p className="text-xs text-slate-400 mt-1">{t('analytics.customerSpendingDetails')}</p>
+                              </div>
+                              <div className="space-y-2 p-4">
+                                {analyticsData.customers.map((customer) => (
+                                  <div key={customer.customer_id} className="border border-slate-700 rounded-lg overflow-hidden">
+                                    <div className="p-4 bg-slate-800/50">
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <p className="font-semibold text-white text-lg">{customer.customer_name}</p>
+                                          <p className="text-xs text-slate-400">
+                                            ID: {customer.customer_id} • {customer.customer_email} • {customer.customer_phone}
+                                          </p>
+                                        </div>
+                                        <div className="grid grid-cols-4 gap-4 text-center">
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.bookings')}</p>
+                                            <p className="text-white font-semibold">{customer.total_bookings || 0}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.totalSpent')}</p>
+                                            <p className="text-emerald-300 font-semibold">₹{(customer.total_amount || 0).toLocaleString()}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.paid')}</p>
+                                            <p className="text-green-300 font-semibold">₹{(customer.paid_amount || 0).toLocaleString()}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.commissionPending')}</p>
+                                            <p className="text-yellow-300 font-semibold">₹{(customer.unpaid_amount || 0).toLocaleString()}</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Transaction Analytics Display */}
+                      {selectedAnalyticsReport === 'transaction' && analyticsData && (
+                        <div className="space-y-6">
+                          {/* Summary Cards */}
+                          {analyticsData.summary && (
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalTransactions')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_transactions || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalAmount')}</p>
+                                <p className="text-2xl font-bold text-emerald-400">₹{(analyticsData.summary.total_amount || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.paidAmount')}</p>
+                                <p className="text-2xl font-bold text-green-400">₹{(analyticsData.summary.paid_amount || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.pendingAmount')}</p>
+                                <p className="text-2xl font-bold text-yellow-400">₹{(analyticsData.summary.unpaid_amount || 0).toLocaleString()}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Commission Breakdown */}
+                          {analyticsData.summary.commission_rates && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                              <h3 className="text-lg font-semibold text-white mb-4">{t('analytics.commissionDistribution')}</h3>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">Driver ({analyticsData.summary.commission_rates.driver_percentage}%)</p>
+                                  <p className="text-xl font-bold text-green-400">₹{(analyticsData.summary.driver_commission || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">Dispatcher ({analyticsData.summary.commission_rates.dispatcher_percentage}%)</p>
+                                  <p className="text-xl font-bold text-purple-400">₹{(analyticsData.summary.dispatcher_commission || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">Admin ({analyticsData.summary.commission_rates.admin_percentage}%)</p>
+                                  <p className="text-xl font-bold text-orange-400">₹{(analyticsData.summary.admin_commission || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">Super Admin ({analyticsData.summary.commission_rates.super_admin_percentage}%)</p>
+                                  <p className="text-xl font-bold text-red-400">₹{(analyticsData.summary.super_admin_commission || 0).toLocaleString()}</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Vehicle Analytics Display */}
+                      {selectedAnalyticsReport === 'vehicle' && analyticsData && (
+                        <div className="space-y-6">
+                          {/* Summary Cards */}
+                          {analyticsData.summary && (
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalVehicles')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_vehicles || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalBookings')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_bookings || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalRevenue')}</p>
+                                <p className="text-2xl font-bold text-emerald-400">₹{(analyticsData.summary.total_revenue || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.avgPerVehicle')}</p>
+                                <p className="text-2xl font-bold text-blue-400">₹{analyticsData.summary.total_vehicles ? Math.round((analyticsData.summary.total_revenue || 0) / analyticsData.summary.total_vehicles).toLocaleString() : 0}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Vehicle Details */}
+                          {analyticsData.vehicles && analyticsData.vehicles.length > 0 && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50">
+                              <div className="p-4 border-b border-slate-700">
+                                <h3 className="text-lg font-semibold text-white">{t('analytics.vehiclePerformance')}</h3>
+                                <p className="text-xs text-slate-400 mt-1">{t('analytics.vehicleUsageDetails')}</p>
+                              </div>
+                              <div className="space-y-2 p-4">
+                                {analyticsData.vehicles.map((vehicle) => (
+                                  <div key={vehicle.vehicle_id} className="border border-slate-700 rounded-lg overflow-hidden">
+                                    <div className="p-4 bg-slate-800/50">
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <p className="font-semibold text-white text-lg">{vehicle.vehicle_make} {vehicle.vehicle_model}</p>
+                                          <p className="text-xs text-slate-400">
+                                            ID: {vehicle.vehicle_id} • {vehicle.registration_number} • {vehicle.transmission_type}
+                                          </p>
+                                        </div>
+                                        <div className="grid grid-cols-4 gap-4 text-center">
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.bookings')}</p>
+                                            <p className="text-white font-semibold">{vehicle.total_bookings || 0}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.revenue')}</p>
+                                            <p className="text-emerald-300 font-semibold">₹{(vehicle.total_revenue || 0).toLocaleString()}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.driver')}</p>
+                                            <p className="text-blue-300 font-semibold">{vehicle.driver_name || t('analytics.nA')}</p>
+                                          </div>
+                                          <div>
+                                            <p className="text-xs text-slate-400">{t('analytics.status')}</p>
+                                            <p className={`font-semibold ${vehicle.status === 'ACTIVE' ? 'text-green-300' : 'text-red-300'}`}>{vehicle.status || t('analytics.nA')}</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Admin Analytics Display */}
+                      {selectedAnalyticsReport === 'admin' && analyticsData && (
+                        <div className="space-y-6">
+                          {/* Summary Cards */}
+                          {analyticsData.summary && (
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalRevenue')}</p>
+                                <p className="text-2xl font-bold text-emerald-400">₹{(analyticsData.summary.total_revenue || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionEarned')}</p>
+                                <p className="text-2xl font-bold text-purple-400">₹{(analyticsData.summary.total_commission_earned || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionPaid')}</p>
+                                <p className="text-2xl font-bold text-green-400">₹{(analyticsData.summary.total_commission_paid || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionPending')}</p>
+                                <p className="text-2xl font-bold text-yellow-400">₹{(analyticsData.summary.total_commission_pending || 0).toLocaleString()}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Commission Details */}
+                          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                            <h3 className="text-lg font-semibold text-white mb-4">{t('analytics.commissionBreakdown', { percentage: '2' })}</h3>
+                            <div className="space-y-4">
+                              <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+                                <span className="text-slate-300">{t('analytics.totalCommission', { percentage: '2' })}</span>
+                                <span className="text-xl font-bold text-purple-400">₹{(analyticsData.summary.total_commission_earned || 0).toLocaleString()}</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                  <p className="text-sm text-green-300 mb-1">{t('analytics.paid')}</p>
+                                  <p className="text-xl font-bold text-green-400">₹{(analyticsData.summary.total_commission_paid || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                                  <p className="text-sm text-yellow-300 mb-1">{t('analytics.commissionPending')}</p>
+                                  <p className="text-xl font-bold text-yellow-400">₹{(analyticsData.summary.total_commission_pending || 0).toLocaleString()}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Super Admin Analytics Display */}
+                      {selectedAnalyticsReport === 'super_admin' && analyticsData && (
+                        <div className="space-y-6">
+                          {/* Summary Cards */}
+                          {analyticsData.summary && (
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalRevenue')}</p>
+                                <p className="text-2xl font-bold text-emerald-400">₹{(analyticsData.summary.total_revenue || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionEarned')}</p>
+                                <p className="text-2xl font-bold text-red-400">₹{(analyticsData.summary.total_commission_earned || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionPaid')}</p>
+                                <p className="text-2xl font-bold text-green-400">₹{(analyticsData.summary.total_commission_paid || 0).toLocaleString()}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.commissionPending')}</p>
+                                <p className="text-2xl font-bold text-yellow-400">₹{(analyticsData.summary.total_commission_pending || 0).toLocaleString()}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Commission Details */}
+                          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                            <h3 className="text-lg font-semibold text-white mb-4">{t('analytics.commissionBreakdown', { percentage: '1' })}</h3>
+                            <div className="space-y-4">
+                              <div className="flex justify-between items-center p-3 bg-slate-900/50 rounded-lg">
+                                <span className="text-slate-300">{t('analytics.totalCommission', { percentage: '1' })}</span>
+                                <span className="text-xl font-bold text-red-400">₹{(analyticsData.summary.total_commission_earned || 0).toLocaleString()}</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                  <p className="text-sm text-green-300 mb-1">{t('analytics.paid')}</p>
+                                  <p className="text-xl font-bold text-green-400">₹{(analyticsData.summary.total_commission_paid || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                                  <p className="text-sm text-yellow-300 mb-1">{t('analytics.commissionPending')}</p>
+                                  <p className="text-xl font-bold text-yellow-400">₹{(analyticsData.summary.total_commission_pending || 0).toLocaleString()}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Overview Analytics Display */}
+                      {selectedAnalyticsReport === 'overview' && analyticsData && (
+                        <div className="space-y-6">
+                          {/* Summary Cards */}
+                          {analyticsData.summary && (
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.totalTrips')}</p>
+                                <p className="text-2xl font-bold text-white">{analyticsData.summary.total_trips || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.completed')}</p>
+                                <p className="text-2xl font-bold text-green-400">{analyticsData.summary.completed_trips || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.cancelled')}</p>
+                                <p className="text-2xl font-bold text-red-400">{analyticsData.summary.cancelled_trips || 0}</p>
+                              </div>
+                              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700">
+                                <p className="text-xs text-slate-400 uppercase mb-1">{t('analytics.activeUsers')}</p>
+                                <p className="text-2xl font-bold text-blue-400">{(analyticsData.summary.active_customers || 0) + (analyticsData.summary.active_drivers || 0)}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Revenue Overview */}
+                          {analyticsData.revenue && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                              <h3 className="text-lg font-semibold text-white mb-4">{t('analytics.revenueOverview')}</h3>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">{t('analytics.totalRevenue')}</p>
+                                  <p className="text-xl font-bold text-emerald-400">₹{(analyticsData.revenue.total_revenue || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">{t('analytics.paidAmount')}</p>
+                                  <p className="text-xl font-bold text-green-400">₹{(analyticsData.revenue.paid_amount || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">{t('analytics.unpaid')}</p>
+                                  <p className="text-xl font-bold text-yellow-400">₹{(analyticsData.revenue.unpaid_amount || 0).toLocaleString()}</p>
+                                </div>
+                                <div className="text-center">
+                                  <p className="text-xs text-slate-400 mb-1">{t('analytics.paymentPending')}</p>
+                                  <p className="text-xl font-bold text-orange-400">{analyticsData.revenue.payment_pending || 0}</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* User Statistics */}
+                          {analyticsData.users && (
+                            <div className="grid gap-6 md:grid-cols-2">
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                              <h3 className="text-lg font-semibold text-white mb-4">{t('analytics.userStatistics')}</h3>
+                              <div className="space-y-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300">{t('analytics.activeCustomers')}</span>
+                                  <span className="text-xl font-bold text-blue-400">{analyticsData.summary?.active_customers || 0}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300">{t('analytics.activeDrivers')}</span>
+                                  <span className="text-xl font-bold text-green-400">{analyticsData.summary?.active_drivers || 0}</span>
+                                </div>
+                              </div>
+                            </div>
+                            </div>
+                          )}
+
+                          {/* Trip Averages */}
+                          {analyticsData.averages && (
+                            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+                              <h3 className="text-lg font-semibold text-white mb-4">{t('analytics.tripAverages')}</h3>
+                              <div className="space-y-3">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300">{t('analytics.avgTripAmount')}</span>
+                                  <span className="text-xl font-bold text-emerald-400">₹{Math.round(analyticsData.averages?.avg_trip_amount || 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300">{t('analytics.avgDuration')}</span>
+                                  <span className="text-xl font-bold text-purple-400">{(analyticsData.averages?.avg_trip_duration_hours || 0).toFixed(1)} hrs</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Catch-all fallback for any analytics data that doesn't match specific report types */}
+                      {!analyticsLoading && analyticsData && !['driver', 'dispatcher', 'customer', 'transaction', 'vehicle', 'admin', 'super_admin', 'overview'].includes(selectedAnalyticsReport) && (
                         <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6">
-                          <pre className="text-sm text-slate-300 overflow-auto max-h-[600px]">
-                            {JSON.stringify(analyticsData, null, 2)}
-                          </pre>
+                          <div className="mb-4">
+                            <h3 className="text-lg font-semibold text-white mb-2">Analytics Data</h3>
+                            <p className="text-sm text-slate-400">
+                              Showing raw data for report type: {selectedAnalyticsReport}
+                            </p>
+                          </div>
+                          {analyticsData && Object.keys(analyticsData).length > 0 ? (
+                            <pre className="text-sm text-slate-300 overflow-auto max-h-[600px] bg-slate-900/50 p-4 rounded-lg">
+                              {JSON.stringify(analyticsData, null, 2)}
+                            </pre>
+                          ) : (
+                            <div className="text-center py-8">
+                              <p className="text-slate-400">No data available for the selected time period.</p>
+                              <p className="text-sm text-slate-500 mt-2">Try selecting a different time range or create some bookings first.</p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -4466,21 +5031,21 @@ function App() {
                           {/* Financial Overview */}
                           <div className="grid grid-cols-3 gap-3 mb-6">
                             <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30">
-                              <p className="text-cyan-400 text-sm">Total Revenue</p>
+                              <p className="text-cyan-400 text-sm">{t('driverDashboard.totalRevenue')}</p>
                               <p className="text-2xl font-bold text-white">₹{transactionSummary.reduce((sum, t) => sum + (parseFloat(t.total_amount) || 0), 0).toLocaleString()}</p>
                             </div>
-                            <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-500/20 to-green-500/20 border border-emerald-500/30">
-                              <p className="text-emerald-400 text-sm">Total Collected</p>
-                              <p className="text-2xl font-bold text-emerald-300">₹{transactionSummary.reduce((sum, t) => sum + (parseFloat(t.paid_amount) || 0), 0).toLocaleString()}</p>
+                            <div className="p-4 rounded-xl bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/30">
+                              <p className="text-green-400 text-sm">{t('driverDashboard.paidAmount')}</p>
+                              <p className="text-2xl font-bold text-white">₹{transactionSummary.reduce((sum, t) => sum + (parseFloat(t.paid_amount) || 0), 0).toLocaleString()}</p>
                             </div>
-                            <div className="p-4 rounded-xl bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/30">
-                              <p className="text-red-400 text-sm">Total Pending</p>
-                              <p className="text-2xl font-bold text-red-300">₹{transactionSummary.reduce((sum, t) => sum + (parseFloat(t.due_amount) || 0), 0).toLocaleString()}</p>
+                            <div className="p-4 rounded-xl bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30">
+                              <p className="text-yellow-400 text-sm">{t('driverDashboard.pendingAmount')}</p>
+                              <p className="text-2xl font-bold text-white">₹{transactionSummary.reduce((sum, t) => sum + (parseFloat(t.unpaid_amount) || 0), 0).toLocaleString()}</p>
                             </div>
                           </div>
 
                           <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
-                            <span>📋</span> All Bookings - Deep Dive Breakdown
+                            <span>📋</span> {t('driverDashboard.allBookingsDeepDive')}
                           </h3>
                           
                           <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-2">
@@ -4503,7 +5068,7 @@ function App() {
                                 <div className="flex justify-between items-start mb-4 pb-3 border-b border-slate-700">
                                   <div>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-cyan-400 text-xs">BOOKING ID:</span>
+                                      <span className="text-cyan-400 text-xs">{t('driverDashboard.bookingId')}</span>
                                       <p className="font-bold text-xl text-white font-mono tracking-wider">{t.transaction_number}</p>
                                     </div>
                                     <p className="text-xs text-slate-500 mt-1">
@@ -4563,7 +5128,7 @@ function App() {
 
                                 {/* Total Amount Highlight */}
                                 <div className="text-center p-4 rounded-xl bg-gradient-to-r from-cyan-500/20 via-blue-500/20 to-purple-500/20 border border-cyan-500/30 mb-4">
-                                  <p className="text-cyan-400 text-sm">TOTAL BOOKING AMOUNT</p>
+                                  <p className="text-cyan-400 text-sm">{t('driverDashboard.totalBookingAmount')}</p>
                                   <p className="text-4xl font-bold text-white">₹{total.toLocaleString()}</p>
                                   <div className="flex justify-center gap-6 mt-2 text-sm">
                                     <span className="text-emerald-400">✓ Paid: ₹{paid.toLocaleString()}</span>
@@ -4573,31 +5138,31 @@ function App() {
 
                                 {/* Commission Breakdown - Detailed */}
                                 <div className="mb-3">
-                                  <p className="text-slate-400 text-xs mb-2 font-semibold">💰 COMMISSION SPLIT BREAKDOWN</p>
+                                  <p className="text-slate-400 text-xs mb-2 font-semibold">💰 {t('driverDashboard.commissionSplitBreakdown')}</p>
                                   <div className="grid grid-cols-4 gap-2">
                                     <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                                      <p className="text-emerald-400 text-xs font-semibold">🚗 DRIVER (75%)</p>
+                                      <p className="text-emerald-400 text-xs font-semibold">🚗 {t('driverDashboard.driver', { percentage: '75' })}</p>
                                       <p className="text-lg font-bold text-emerald-300">₹{driverShare}</p>
                                       <div className="mt-1 pt-1 border-t border-emerald-500/30 text-xs">
                                         <span className="text-emerald-400">Paid: ₹{driverPaid}</span>
                                       </div>
                                     </div>
                                     <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30">
-                                      <p className="text-blue-400 text-xs font-semibold">🏢 ADMIN (20%)</p>
+                                      <p className="text-blue-400 text-xs font-semibold">🏢 {t('driverDashboard.admin', { percentage: '20' })}</p>
                                       <p className="text-lg font-bold text-blue-300">₹{adminShare}</p>
                                       <div className="mt-1 pt-1 border-t border-blue-500/30 text-xs">
                                         <span className="text-blue-400">Paid: ₹{adminPaid}</span>
                                       </div>
                                     </div>
                                     <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30">
-                                      <p className="text-purple-400 text-xs font-semibold">📞 DISPATCHER (2%)</p>
+                                      <p className="text-purple-400 text-xs font-semibold">📞 {t('driverDashboard.dispatcher', { percentage: '2' })}</p>
                                       <p className="text-lg font-bold text-purple-300">₹{dispatcherShare}</p>
                                       <div className="mt-1 pt-1 border-t border-purple-500/30 text-xs">
                                         <span className="text-purple-400">Paid: ₹{dispatcherPaid}</span>
                                       </div>
                                     </div>
                                     <div className="p-3 rounded-xl bg-pink-500/10 border border-pink-500/30">
-                                      <p className="text-pink-400 text-xs font-semibold">👑 SUPER ADMIN (3%)</p>
+                                      <p className="text-pink-400 text-xs font-semibold">👑 {t('driverDashboard.superAdmin', { percentage: '3' })}</p>
                                       <p className="text-lg font-bold text-pink-300">₹{superAdminShare}</p>
                                       <div className="mt-1 pt-1 border-t border-pink-500/30 text-xs">
                                         <span className="text-pink-400">Paid: ₹{superAdminPaid}</span>
@@ -4651,13 +5216,13 @@ function App() {
 
                           {/* Total Amount */}
                           <div className="text-center p-4 rounded-xl bg-gradient-to-r from-rose-500/20 via-pink-500/20 to-purple-500/20 border border-rose-500/30 mb-6">
-                            <p className="text-rose-400 text-sm">TOTAL SETTLEMENT AMOUNT</p>
+                            <p className="text-rose-400 text-sm">{t('driverDashboard.totalSettlementAmount')}</p>
                             <p className="text-4xl font-bold text-white">₹{paymentSummary.total_amount.toLocaleString()}</p>
                           </div>
 
                           {/* By Payment Method */}
                           <div className="mb-6">
-                            <h4 className="text-sm font-semibold text-slate-300 mb-3">By Payment Method</h4>
+                            <h4 className="text-sm font-semibold text-slate-300 mb-3">{t('driverDashboard.byPaymentMethod')}</h4>
                             <div className="grid grid-cols-3 gap-3">
                               {paymentSummary.by_method?.map((m, idx) => (
                                 <div key={idx} className={`p-4 rounded-xl border ${
@@ -4998,7 +5563,7 @@ function App() {
                   </div>
                   <div className="space-y-2">
                     <p className="text-sm text-slate-300">
-                      <span className="text-slate-500">Total Amount:</span> 
+                      <span className="text-slate-500">{t('driverDashboard.totalAmount')}:</span> 
                       <span className="text-white font-semibold ml-2">₹{(paymentSummary?.total_amount || 0).toFixed(2)}</span>
                     </p>
                     {paymentSummary?.by_method?.map((m, idx) => (
