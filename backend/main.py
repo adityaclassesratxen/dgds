@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import case
@@ -2732,6 +2732,39 @@ async def get_seeding_status(
         raise HTTPException(status_code=403, detail="Only admins can check seeding status")
     
     return seeding_status
+
+
+@app.websocket("/ws/location/{trip_id}")
+async def websocket_location(websocket: WebSocket, trip_id: str):
+    """
+    WebSocket endpoint for real-time driver GPS tracking.
+    
+    Usage:
+    - Driver page connects and sends: {"lat": 28.6139, "lng": 77.2090}
+    - Dispatcher map connects and receives same messages
+    
+    Args:
+        trip_id: Transaction number (e.g., "TXN-SEED-0011")
+    
+    Flow:
+    1. Driver opens /driver/live?trip=TXN-SEED-0011
+    2. Browser GPS → WebSocket → Backend
+    3. Backend broadcasts to all dispatchers watching this trip
+    4. Dispatcher map updates in real-time
+    """
+    from ws.location import manager
+    
+    await manager.connect(trip_id, websocket)
+    try:
+        while True:
+            # Receive GPS data from driver
+            data = await websocket.receive_json()
+            # data should be: {"lat": float, "lng": float}
+            
+            # Broadcast to all other connections in this trip room
+            await manager.broadcast(trip_id, data)
+    except WebSocketDisconnect:
+        manager.disconnect(trip_id, websocket)
 
 
 if __name__ == "__main__":
