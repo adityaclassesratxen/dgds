@@ -17,6 +17,9 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:2060';
+const WS_BASE_URL = API_BASE_URL.replace('http', 'ws');
+
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
@@ -72,6 +75,27 @@ const destIcon = new L.DivIcon({
 const isMovingStatus = (status) =>
   status === "ENROUTE_TO_PICKUP" || status === "CUSTOMER_PICKED";
 
+/**
+ * Fetch real road route from OSRM (free, no API key needed)
+ * Returns array of [lat, lng] coordinates following actual roads
+ */
+async function fetchRoute(from, to) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.routes && data.routes[0]) {
+      return data.routes[0].geometry.coordinates.map(
+        ([lng, lat]) => [lat, lng]
+      );
+    }
+    return [from, to]; // Fallback to straight line
+  } catch (error) {
+    console.error('OSRM routing error:', error);
+    return [from, to]; // Fallback to straight line
+  }
+}
+
 const MapUpdater = ({ center }) => {
   const map = useMap();
   useEffect(() => {
@@ -89,11 +113,57 @@ const TripMapTracker = ({ trip, onClose }) => {
 
   const [driverLocation, setDriverLocation] = useState(pickupCoords);
   const [routePath, setRoutePath] = useState([pickupCoords]);
+  const [fullRoute, setFullRoute] = useState([pickupCoords, destCoords]); // Real road path
   const [progress, setProgress] = useState(0);
   const [eta, setEta] = useState(null);
 
   /* ============================
-     CORE LOGIC (FIXED)
+     LOAD REAL ROAD ROUTE (OSRM)
+  ============================ */
+  useEffect(() => {
+    fetchRoute(pickupCoords, destCoords).then(route => {
+      setFullRoute(route);
+      console.log('Real road route loaded:', route.length, 'points');
+    });
+  }, []);
+
+  /* ============================
+     WEBSOCKET - REAL-TIME GPS
+  ============================ */
+  useEffect(() => {
+    if (!trip?.transaction_number) return;
+
+    const ws = new WebSocket(
+      `${WS_BASE_URL}/ws/location/${trip.transaction_number}`
+    );
+
+    ws.onopen = () => {
+      console.log('WebSocket connected for trip:', trip.transaction_number);
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('Received GPS update:', data);
+      
+      // Update driver location from real GPS
+      setDriverLocation([data.lat, data.lng]);
+      setRoutePath((prev) => [...prev, [data.lat, data.lng]]);
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    return () => ws.close();
+  }, [trip?.transaction_number]);
+
+  /* ============================
+     SIMULATED MOVEMENT (FALLBACK)
+     Only runs if no real GPS data
   ============================ */
   useEffect(() => {
     if (!trip?.status) return;
@@ -207,8 +277,11 @@ const TripMapTracker = ({ trip, onClose }) => {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            <Polyline positions={[pickupCoords, destCoords]} color="#64748b" />
-            <Polyline positions={routePath} color="#3b82f6" />
+            {/* Full route preview (real roads, faded) */}
+            <Polyline positions={fullRoute} color="#64748b" weight={3} opacity={0.4} />
+            
+            {/* Driver's traveled path (bright blue) */}
+            <Polyline positions={routePath} color="#3b82f6" weight={4} opacity={0.8} />
 
             <Marker position={pickupCoords} icon={pickupIcon}>
               <Popup>Pickup</Popup>

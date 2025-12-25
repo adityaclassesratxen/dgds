@@ -29,6 +29,7 @@ import {
 import LanguageSwitcher from './components/LanguageSwitcher';
 import BookingShareModal from './components/BookingShareModal';
 import TripMapTracker from './components/TripMapTracker';
+import DriverLiveLocation from './pages/DriverLiveLocation';
 
 // API Configuration - Uses environment variable or falls back to localhost
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:2060';
@@ -190,7 +191,7 @@ function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const [view, setView] = useState('register'); // 'register', 'customers', 'trips', 'drivers', 'dispatchers', 'booking', 'vehicles'
+  const [view, setView] = useState('register'); // 'register', 'customers', 'trips', 'drivers', 'dispatchers', 'booking', 'vehicles', 'driver-live'
   const [customerInfo, setCustomerInfo] = useState({ name: '', email: '' });
   const [addresses, setAddresses] = useState([createEmptyAddress(true)]);
   const [contacts, setContacts] = useState([createEmptyContact(true)]);
@@ -2281,7 +2282,14 @@ function App() {
               <p className="text-slate-400">No trips found.</p>
             ) : (
               <div className="space-y-4">
-                {trips.map((trip) => {
+                {trips
+                  .sort((a, b) => {
+                    // Sort by transaction number numerically (latest first)
+                    const numA = parseInt(a.transaction_number?.split('-').pop() || '0');
+                    const numB = parseInt(b.transaction_number?.split('-').pop() || '0');
+                    return numB - numA;
+                  })
+                  .map((trip) => {
                   // Get customer primary phone
                   const customerPhone = trip.customer?.contact_numbers?.find(c => c.is_primary)?.phone_number || 
                                        trip.customer?.contact_numbers?.[0]?.phone_number;
@@ -6367,6 +6375,9 @@ function App() {
           onClose={() => setTrackingTrip(null)}
         />
       )}
+
+      {/* Driver Live GPS Page */}
+      {view === 'driver-live' && <DriverLiveLocation />}
     </div>
   );
 }
